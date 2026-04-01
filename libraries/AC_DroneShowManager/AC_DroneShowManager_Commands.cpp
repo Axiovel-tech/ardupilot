@@ -333,8 +333,11 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
     sb_time_segment_t segment;
     bool success;
 
+    _time_axis_configuration_packet_count++;
+
     if (length < sizeof(CustomPackets::time_axis_config_header_t)) {
         // Packet too short - even with no scenes the packet must be at least this long
+        _time_axis_configuration_last_error = 1;
         return false;
     }
 
@@ -347,6 +350,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
     )) {
         // Packet too short - even with no segments in each of the scenes the packet
         // must be at least this long
+        _time_axis_configuration_last_error = 2;
         return false;
     }
     
@@ -387,6 +391,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
     // create a new screenplay, and then swap it with the existing one only if everything
     // went well.
     if (sb_screenplay_init(&new_screenplay) != SB_SUCCESS) {
+        _time_axis_configuration_last_error = 3;
         return false;
     }
     
@@ -409,6 +414,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
     for (scene_index = 0; scene_index < num_scenes; scene_index++) {
         if (ptr + sizeof(CustomPackets::time_axis_config_scene_header_t) > end) {
             // Packet too short
+            _time_axis_configuration_last_error = 4;
             goto exit;
         }
         
@@ -418,6 +424,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
         // Add a new scene to the screenplay
         if (sb_screenplay_append_new_scene(&new_screenplay, &scene) != SB_SUCCESS) {
             // Could not add new scene
+            _time_axis_configuration_last_error = 5;
             goto exit;
         }
         
@@ -435,6 +442,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
             float rth_start_time = static_cast<float>(scene_header->scene_id & 0x3FFF);
             if (rth_plan == NULL || sb_rth_plan_evaluate_at(rth_plan, rth_start_time, &rth_plan_entry) != SB_SUCCESS) {
                 // Could not evaluate RTH plan at the given time
+                _time_axis_configuration_last_error = 6;
                 goto exit;
             }
             
@@ -455,21 +463,25 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                 
                 if (rth_trajectory == nullptr) {
                     // Out of memory
+                    _time_axis_configuration_last_error = 7;
                     goto exit;
                 }
                 
                 if (_show_controller.trajectory_player == nullptr) {
                     // should not happen
+                    _time_axis_configuration_last_error = 8;
                     goto exit;
                 }
                 
                 if (sb_trajectory_player_clone(&player, _show_controller.trajectory_player) != SB_SUCCESS) {
                     // should not happen
+                    _time_axis_configuration_last_error = 9;
                     goto exit;
                 }
                 
                 if (sb_trajectory_player_get_position_at(&player, rth_start_time, &start_with_yaw) != SB_SUCCESS) {
                     // should not happen
+                    _time_axis_configuration_last_error = 10;
                     sb_trajectory_player_destroy(&player);
                     goto exit;
                 }
@@ -479,6 +491,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                 start.z = start_with_yaw.z;
                 if (sb_trajectory_update_from_rth_plan_entry(rth_trajectory, &rth_plan_entry, start) != SB_SUCCESS) {
                     // Could not create RTH plan trajectory
+                    _time_axis_configuration_last_error = 11;
                     sb_trajectory_player_destroy(&player);
                     SB_DECREF(rth_trajectory);
                     goto exit;
@@ -511,6 +524,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
             }
         } else {
             // Unknown scene ID; may be used in the future but it has no meaning now
+            _time_axis_configuration_last_error = 12;
             goto exit;
         }
 
@@ -520,6 +534,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
         time_axis = scene ? sb_screenplay_scene_get_time_axis(scene) : nullptr;
         if (time_axis == nullptr) {
             // Could not get time axis; this should not happen but let's be defensive
+            _time_axis_configuration_last_error = 13;
             goto exit;
         }
         
@@ -530,6 +545,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
         for (entry_index = 0; entry_index < num_entries; entry_index++) {
             if (ptr + sizeof(CustomPackets::time_axis_config_scene_entry_t) > end) {
                 // Packet too short
+                _time_axis_configuration_last_error = 14;
                 goto exit;
             }
             
@@ -568,6 +584,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                 entry->final_rate_scaled / 65535.0f
             );
             if (sb_time_axis_append_segment(time_axis, segment) != SB_SUCCESS) {
+                _time_axis_configuration_last_error = 15;
                 goto exit;
             }
         }

@@ -19,8 +19,10 @@
 // @Field: R: Red component of current color in show
 // @Field: G: Green component of current color in show
 // @Field: B: Blue component of current color in show
-// @Field: HDist: Horizontal distance from desired position
-// @Field: VDist: Vertical distance from desired position
+// @Field: HDst: Horizontal distance from desired position
+// @Field: VDst: Vertical distance from desired position
+// @Field: TAC: Number of time axis configuration packets received
+// @Field: TAE: Last error code during the reception of time axis configuration packets
 
 // drone show mode logging
 struct PACKED log_DroneShowStatus {
@@ -38,6 +40,8 @@ struct PACKED log_DroneShowStatus {
     uint8_t blue;
     float h_dist;
     float v_dist;
+    uint16_t time_axis_config_packet_count;
+    uint8_t time_axis_config_last_error;
 };
 
 // @LoggerMessage: FNCS
@@ -128,7 +132,7 @@ struct PACKED log_CollectiveRTHTrigger {
 
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
     { LOG_DRONE_SHOW_MSG, sizeof(log_DroneShowStatus),                  \
-      "SHOW", "QiBBifffBBBff", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDist,VDist", "ss--smmm---mm", "FC--C--------" }, \
+      "SHOW", "QiBBifffBBBffHB", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDst,VDst,TAC,TAE", "ss--smmm---mm--", "FC--C----------" }, \
     { LOG_FENCE_STATUS_MSG, sizeof(log_FenceStatus),                    \
       "FNCS", "QBBHBBH", "TimeUS,GeoEn,GeoB,GeoCnt,HardB,BubbleB,BubbleCnt", "s------", "F------" }, \
     { LOG_DRONE_SHOW_EVENT_MSG, sizeof(log_DroneShowEvent),              \

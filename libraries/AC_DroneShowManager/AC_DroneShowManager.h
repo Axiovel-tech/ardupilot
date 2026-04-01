@@ -16,6 +16,7 @@
 
 #include <GCS_MAVLink/ap_message.h>
 
+#include <cstdint>
 #include <skybrush/skybrush.h>
 
 #include "DroneShow_Enums.h"
@@ -804,6 +805,14 @@ private:
     // two bits of this value regularly in status packets to allow the GCS to
     // detect when the drone was rebooted
     uint16_t _boot_count;
+
+    // Number of time axis configuration packets received from the GCS since boot, used
+    // for debugging purposes. Rolls over at 65535.
+    uint16_t _time_axis_configuration_packet_count;
+
+    // Last error condition during the reception of a time axis configuration packet,
+    // used for debugging purposes. Zero means no error.
+    uint8_t _time_axis_configuration_last_error;
 
     // Reference to the waypoint navigation module so we can query the takeoff parameters
     const AC_WPNav* _wp_nav;
