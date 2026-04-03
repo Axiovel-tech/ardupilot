@@ -564,6 +564,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                 float duration_sec;
 
                 if (sb_screenplay_scene_get_uncovered_trajectory_duration_sec(scene, &duration_sec) != SB_SUCCESS) {
+                    _time_axis_configuration_last_error = 15;
                     goto exit;
                 }
 
@@ -581,7 +582,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
             }
 
             if (sb_time_axis_append_segment(time_axis, segment) != SB_SUCCESS) {
-                _time_axis_configuration_last_error = 15;
+                _time_axis_configuration_last_error = 16;
                 goto exit;
             }
         }
