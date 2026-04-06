@@ -520,7 +520,7 @@ public:
 
     // Writes a sequence of log messages containing a representation of the current time
     // axis
-    void write_screenplay_log_messages(uint8_t seq_no, sb_screenplay_t* screenplay = NULL);
+    void write_screenplay_log_messages();
 
     // Writes a message holding the status of the drone show subsystem into the log
     void write_show_status_log_message() const;
@@ -687,6 +687,9 @@ private:
     // the show. This is needed to ensure that we always have references to the
     // original data, even if the screenplay is modified in a way that it does not
     // refer to the loaded show any more.
+    // 
+    // Also ensure that we can get a handle to the trajectory of the show any time
+    // to modify its ending at takeoff even if the screenplay does not contain it.
     sb_screenplay_scene_t _main_show_scene;
 
     // Controller that manages the trajectory player, the light program player,
@@ -797,6 +800,9 @@ private:
 
     // Last guided mode command that was sent
     GuidedModeCommand _last_setpoint;
+    
+    // Sequence number of the last time axis configuration packet that was processed
+    uint16_t _last_time_axis_config_seq_no;
 
     // Timestamp that defines whether the RC start switch is blocked (and if so, until when)
     uint32_t _rc_switches_blocked_until;
@@ -846,7 +852,25 @@ private:
     // Creates the directory in which the drone show specific files are stored
     // on the filesystem
     bool _create_show_directory();
-
+    
+    // Ensures that the time axis of the given scene is set up in a way that the
+    // relevant part of the trajectory will be played in full.
+    // 
+    // The relevant part is defined as follows. If the trajectory is the main show
+    // trajectory, its relevant part is all the way up to the point where it crosses
+    // the takeoff altitude for the last time from above. Otherwise, it is the full
+    // duration of the trajectory. This is to ensure that we trigger the landing at
+    // the end of the normal show trajectory at the takeoff altitude so ArduPilot can
+    // take over with its own landing algorithm (which has landing detection enabled).
+    //
+    // If the current time axis configuration has a total duration that is shorter than
+    // the duration of the relevant part of the trajectory, the time axis will be
+    // extended with a new segment with the given initial and final rates and the
+    // necessary duration.
+    bool _ensure_scene_covers_relevant_part_of_trajectory(
+        sb_screenplay_scene_t* scene, float initial_rate, float final_rate
+    ) WARN_IF_UNUSED;
+    
     // Fills the given buffer with basic drone show telemetry data and returns
     // a pointer to after the last byte written into the buffer.
     //
@@ -891,14 +915,6 @@ private:
     // This is unlikely and probably indicates bigger problems, but we need to handle
     // it anyway.
     const sb_control_output_t* _get_raw_show_control_output_at_seconds(float time);
-    
-    // Returns a borrowed reference to the trajectory being flown at the given
-    // timestamp, or \c nullptr if the timestamp is out of range or there is no
-    // associated trajectory at the given time.
-    // 
-    // The reference is borrowed; you need to increase its reference count with
-    // \c SB_INCREF if you want to hold on to it.
-    sb_trajectory_t* _get_trajectory_at_seconds(float time);
     
     // Handles a generic MAVLink DATA* message from the ground station.
     bool _handle_custom_data_message(mavlink_channel_t chan, uint8_t type, void* data, uint8_t length);

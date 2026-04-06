@@ -1,6 +1,4 @@
 #include <GCS_MAVLink/GCS.h>
-#include <cstdint>
-#include <limits>
 #include <skybrush/skybrush.h>
 
 #include "AC_DroneShowManager.h"
@@ -8,8 +6,6 @@
 #include "DroneShow_CustomPackets.h"
 #include "DroneShow_Enums.h"
 #include "DroneShowPyroDevice.h"
-#include "skybrush/screenplay.h"
-#include "skybrush/time_axis.h"
 
 MAV_RESULT AC_DroneShowManager::handle_command_int_packet(const mavlink_command_int_t &packet)
 {
@@ -322,7 +318,6 @@ bool AC_DroneShowManager::_handle_data96_message(mavlink_channel_t chan, const m
 
 bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uint8_t length)
 {
-    static uint16_t previous_seq_no = 0xFFFF;   // 0xFFFF is never a valid sequence number
     CustomPackets::time_axis_config_header_t* header;
     CustomPackets::time_axis_config_scene_header_t* scene_header;
     CustomPackets::time_axis_config_scene_entry_t* entry;
@@ -356,12 +351,15 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
         return false;
     }
     
-    if (header->seq_no == previous_seq_no) {
+    if (header->seq_no == _last_time_axis_config_seq_no) {
         // Duplicate packet
         return true;
     }
     
-    if (previous_seq_no <= 0xFF && (header->seq_no - static_cast<uint8_t>(previous_seq_no) >= 0xF0)) {
+    if (
+        _last_time_axis_config_seq_no <= 0xFF &&
+        (header->seq_no - static_cast<uint8_t>(_last_time_axis_config_seq_no) >= 0xF0)
+    ) {
         // Probably the packets are being sent on two or more redundant channels and
         // we are receiving them out-of-order
         return true;
@@ -392,7 +390,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
     }
     
     // Remember the sequence number
-    previous_seq_no = header->seq_no;
+    _last_time_axis_config_seq_no = header->seq_no;
     
     // We need to be extra careful here; if an error happens while we are setting up the
     // new scenes, we want to leave the existing screenplay intact. Therefore, we first
@@ -568,22 +566,24 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                     goto exit;
                 }
 
-                segment = sb_time_segment_make_warped(
-                    duration_sec,
-                    entry->initial_rate_scaled / 65535.0f,
+                if (!_ensure_scene_covers_relevant_part_of_trajectory(
+                    scene, entry->initial_rate_scaled / 65535.0f,
                     entry->final_rate_scaled / 65535.0f
-                );
+                )) {
+                    _time_axis_configuration_last_error = 17;
+                    goto exit;
+                }
             } else {
                 segment = sb_time_segment_make(
                     entry->duration_msec,
                     entry->initial_rate_scaled / 65535.0f,
                     entry->final_rate_scaled / 65535.0f
                 );
-            }
-
-            if (sb_time_axis_append_segment(time_axis, segment) != SB_SUCCESS) {
-                _time_axis_configuration_last_error = 16;
-                goto exit;
+                
+                if (sb_time_axis_append_segment(time_axis, segment) != SB_SUCCESS) {
+                    _time_axis_configuration_last_error = 16;
+                    goto exit;
+                }
             }
         }
         
@@ -608,7 +608,7 @@ exit:
         _invalidate_projected_wall_clock_time_at_takeoff();
 
         // Add log entries containing the current screenplay
-        write_screenplay_log_messages(header->seq_no, NULL);
+        write_screenplay_log_messages();
     } else {
         // Clean up the new screenplay that we tried to prepare
         sb_screenplay_destroy(&new_screenplay);

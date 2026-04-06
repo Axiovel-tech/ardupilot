@@ -1,7 +1,6 @@
-#include <GCS_MAVLink/GCS.h>
-
 #include <sys/types.h>
 
+#include <AC_Fence/AC_Fence.h>
 #include <AP_Filesystem/AP_Filesystem.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_HAL/AP_HAL.h>
@@ -11,9 +10,9 @@
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Notify/DroneShowNotificationBackend.h>
 #include <AP_Param/AP_Param.h>
+#include <GCS_MAVLink/GCS.h>
 
 #include "AC_DroneShowManager.h"
-#include <AC_Fence/AC_Fence.h>
 
 #include <skybrush/skybrush.h>
 
@@ -49,7 +48,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _boot_count(0),
     _time_axis_configuration_packet_count(0),
     _time_axis_configuration_last_error(0),
-    _projected_wall_clock_time_at_takeoff_sec(NAN)
+    _projected_wall_clock_time_at_takeoff_sec(NAN),
+    _last_time_axis_config_seq_no(0xFFFF)    // 0xFFFF is never a valid sequence number
 {
     bool ok = true;
 
@@ -336,20 +336,6 @@ const sb_control_output_t* AC_DroneShowManager::_get_raw_show_control_output_at_
     return sb_show_controller_get_current_output(&_show_controller);
 }
 
-sb_trajectory_t* AC_DroneShowManager::_get_trajectory_at_seconds(float time)
-{
-    uint32_t time_msec = static_cast<uint32_t>(time * 1000.0f);
-    sb_screenplay_scene_t* scene;
-    
-    if (sb_show_controller_update_time_msec(&_show_controller, time_msec))
-    {
-        return nullptr;
-    }
-    
-    scene = sb_show_controller_get_current_scene(&_show_controller);
-    return scene ? scene->trajectory : nullptr;
-}
-
 bool AC_DroneShowManager::get_desired_global_position_at_seconds(float time, Location& loc)
 {
     const sb_control_output_t* output = _get_raw_show_control_output_at_seconds(time);
@@ -451,6 +437,11 @@ void AC_DroneShowManager::notify_drone_show_mode_entered_stage(DroneShowModeStag
     // Force-update preflight checks so we see the errors immediately if we
     // switched to the "waiting for start time" stage
     _update_preflight_check_result(/* force = */ true);
+    
+    // If we have just started the takeoff, log the current time axis configuration
+    // because the first one is typically not logged (since the motors are not armed
+    // when we receive it)
+    write_screenplay_log_messages();
 }
 
 void AC_DroneShowManager::notify_drone_show_mode_exited()
@@ -571,7 +562,50 @@ void AC_DroneShowManager::_clear_start_time_if_set_by_switch()
     if (_start_time_requested_by == StartTimeSource::RC_SWITCH) {
         clear_scheduled_start_time(/* force = */ true);
     }
- }
+}
+
+bool AC_DroneShowManager::_ensure_scene_covers_relevant_part_of_trajectory(
+    sb_screenplay_scene_t* scene, float initial_rate, float final_rate
+)
+{
+    float duration_sec;
+    sb_time_axis_t* time_axis;
+    sb_time_segment_t segment;
+
+    time_axis = scene ? sb_screenplay_scene_get_time_axis(scene) : nullptr;
+    if (!time_axis) {
+        return false;
+    }
+
+    if (sb_screenplay_scene_get_uncovered_trajectory_duration_sec(scene, &duration_sec) != SB_SUCCESS) {
+        return false;
+    }
+    
+    switch (sb_screenplay_scene_get_tag(scene)) {
+        case SceneTag_MainShow:
+            if (
+                isfinite(_trajectory_stats.duration_sec) &&
+                isfinite(_trajectory_stats.landing_time_sec) &&
+                _trajectory_stats.duration_sec >= 0 &&
+                _trajectory_stats.landing_time_sec >= 0 &&
+                _trajectory_stats.landing_time_sec <= _trajectory_stats.duration_sec
+            ) {
+                duration_sec -= _trajectory_stats.duration_sec - _trajectory_stats.landing_time_sec;
+            }
+            break;
+
+        default:
+            break;
+    }
+    
+    if (duration_sec <= 0) {
+        return true;
+    }
+    
+    // We need to add a new segment to the time axis to cover the relevant part of the trajectory
+    segment = sb_time_segment_make_warped(duration_sec, initial_rate, final_rate);
+    return sb_time_axis_append_segment(time_axis, segment) == SB_SUCCESS;
+}
 
 bool AC_DroneShowManager::_is_at_expected_position() const
 {
