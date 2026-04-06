@@ -559,18 +559,11 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
             ptr += sizeof(CustomPackets::time_axis_config_scene_entry_t);
     
             if (entry->duration_msec == 0) {
-                float duration_sec;
-
-                if (sb_screenplay_scene_get_uncovered_trajectory_duration_sec(scene, &duration_sec) != SB_SUCCESS) {
-                    _time_axis_configuration_last_error = 15;
-                    goto exit;
-                }
-
                 if (!_ensure_scene_covers_relevant_part_of_trajectory(
                     scene, entry->initial_rate_scaled / 65535.0f,
                     entry->final_rate_scaled / 65535.0f
                 )) {
-                    _time_axis_configuration_last_error = 17;
+                    _time_axis_configuration_last_error = 15;
                     goto exit;
                 }
             } else {
@@ -579,7 +572,7 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
                     entry->initial_rate_scaled / 65535.0f,
                     entry->final_rate_scaled / 65535.0f
                 );
-                
+
                 if (sb_time_axis_append_segment(time_axis, segment) != SB_SUCCESS) {
                     _time_axis_configuration_last_error = 16;
                     goto exit;
