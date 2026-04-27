@@ -6,9 +6,11 @@
 
 #include "AP_InertialSensor_Backend.h"
 
-// simulated sensor rates in Hz. This matches a pixhawk1
-const uint16_t INS_SITL_SENSOR_A[] = { 1000, 1000 };
-const uint16_t INS_SITL_SENSOR_B[] = { 760, 800 };
+// simulated sensor rates in Hz.
+// Run the primary SITL IMU at 2kHz so the Copter fast-rate thread can be
+// exercised at the same rate as the target hardware setup.
+const uint16_t INS_SITL_SENSOR_A[] = { 2000, 2000 };
+const uint16_t INS_SITL_SENSOR_B[] = { 2000, 2000 };
 
 #include <SITL/SITL.h>
 
