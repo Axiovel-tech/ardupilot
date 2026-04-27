@@ -66,7 +66,7 @@
 #  if CONFIG_HAL_BOARD == HAL_BOARD_SITL
 #    define HAL_BOARD_COLLMOT_DIRECTORY "./collmot"
 #  else
-#    define HAL_BOARD_COLLMOT_DIRECTORY "/COLLMOT"
+#    define HAL_BOARD_COLLMOT_DIRECTORY "/collmot"
 #  endif
 #endif
 
