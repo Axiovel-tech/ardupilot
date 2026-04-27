@@ -25,7 +25,7 @@
 
  1. High frequency gyro processing allows filters to be applied with high sample rates
     which is advantageous in removing high frequency noise and associated aliasing
- 2. High frequency rate control reduces the latency between control and action leading to 
+ 2. High frequency rate control reduces the latency between control and action leading to
     better disturbance rejection and faster responses which generally means higher
     PIDs can be used without introducing control oscillation
 
@@ -37,7 +37,7 @@
 
     gyro read->filter->publish->rate control->motor output
 
- This ensures the minimum latency between gyro sample and motor output. Other functions need 
+ This ensures the minimum latency between gyro sample and motor output. Other functions need
  to also run faster than they would normally most notably logging and filter frequencies - most
  notably the harmonic notch frequency.
 
@@ -61,7 +61,7 @@
     consistently and is updated consistently.
  4. The data that the rest of the vehicle uses is the same data that the rate thread uses.
     Put another way any gyro value that the vehicle uses (e.g. in the EKF etc), must have already
-    been processed by the rate thread. Where this becomes important is with sub-sampling - if 
+    been processed by the rate thread. Where this becomes important is with sub-sampling - if
     rate gyro values are sub-sampled we need to make sure that the vehicle is also only using
     the sub-sampled values.
 
@@ -69,7 +69,7 @@
 
  1. Filtered gyro samples are (sub-sampled and) pushed into an ObjectBuffer from the INS backend.
  2. The pushed sample is published to the INS front-end so that the rest of the vehicle only
-    sees published values that have been used by the rate controller. When the rate thread is not 
+    sees published values that have been used by the rate controller. When the rate thread is not
     in use the filtered samples are effectively sub-sampled at the main loop rate. The EKF is unaffected
     as it uses delta angles calculated from the raw gyro values. (It might be possible to avoid publishing
     from the rate thread by only updating _gyro_filtered when a value is pushed).
@@ -133,7 +133,7 @@
  SPI4          PRI=181 sp=0x3002D4A0 STACK= 896/1464 LOAD= 9.1%
  rate          PRI=182 sp=0x30029FB0 STACK=1296/1976 LOAD=11.8%
 
- This essentially means that its possible to run this scheme successfully on all MCUs by careful setting of 
+ This essentially means that its possible to run this scheme successfully on all MCUs by careful setting of
  the maximum rates.
 
  Enabling rate thread timing debug for 4Khz reads with fast logging and armed we get the following data:
