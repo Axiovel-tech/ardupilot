@@ -379,6 +379,10 @@ void NavEKF3_core::InitialiseVariables()
     yawMeasTime_ms = 0;
     memset(&yawAngDataNew, 0, sizeof(yawAngDataNew));
     memset(&yawAngDataDelayed, 0, sizeof(yawAngDataDelayed));
+    memset(&yawAngDataVirtualCompass, 0, sizeof(yawAngDataVirtualCompass));
+    virtualCompassYaw = 0.0f;
+    virtualCompassYawInitialised = false;
+    virtualCompassWasArmed = false;
 
 #if EK3_FEATURE_EXTERNAL_NAV
     // external nav data fusion

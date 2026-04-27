@@ -42,7 +42,8 @@ public:
         GPS = 2,
         GPS_COMPASS_FALLBACK = 3,
         EXTNAV = 6,
-        GSF = 8
+        GSF = 8,
+        VIRTUAL_COMPASS = 9
     };
 
     // enum for OPTIONS parameter
@@ -81,6 +82,9 @@ public:
 
     // get yaw source
     SourceYaw getYawSource() const;
+
+    // get the virtual compass initial yaw angle in radians
+    float getVirtualCompassInitialYawRad() const;
 
     // align position of inactive sources to ahrs
     void align_inactive_sources();
@@ -129,6 +133,7 @@ private:
     bool option_is_set(SourceOptions option) const { return (_options.get() & int16_t(option)) != 0; }
 
     AP_Int16 _options;      // source options bitmask
+    AP_Float _vcompass_yaw_deg; // virtual compass initial yaw angle in degrees
 
     uint8_t active_source_set; // index of active source set
     bool _configured; // true once configured has returned true
