@@ -698,6 +698,7 @@ private:
         STATIC=3,
         PREDICTED=4,
         EXTNAV=5,
+        VIRTUAL_COMPASS=6,
     };
 
     // update the navigation filter status
@@ -831,6 +832,8 @@ private:
 
     // align the yaw angle for the quaternion states to the given yaw angle which should be at the fusion horizon
     void alignYawAngle(const yaw_elements &yawAngData);
+    void updateVirtualCompassYaw();
+    bool getVirtualCompassYawData(yaw_elements &yawAngData);
 
     // update mag field states and associated variances using magnetomer and declination data
     void resetMagFieldStates();
@@ -1357,6 +1360,10 @@ private:
     yaw_elements yawAngDataNew;         // GPS yaw angle at the current time horizon
     yaw_elements yawAngDataDelayed;     // GPS yaw angle at the fusion time horizon
     yaw_elements yawAngDataStatic;      // yaw angle (regardless of yaw source) when the vehicle was last on ground and not moving
+    yaw_elements yawAngDataVirtualCompass; // virtual compass yaw angle at the fusion time horizon
+    ftype virtualCompassYaw;            // virtual compass yaw angle, propagated while armed and frozen while disarmed
+    bool virtualCompassYawInitialised;  // true once the virtual compass yaw has been loaded from the parameter
+    bool virtualCompassWasArmed;        // previous armed state used to capture the disarm heading
 
     // Range Beacon Sensor Fusion
 #if EK3_FEATURE_BEACON_FUSION

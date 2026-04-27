@@ -851,8 +851,11 @@ void NavEKF3_core::runYawEstimatorCorrection()
             }
         }
 
-        // action an external reset request
-        if (EKFGSF_yaw_reset_request_ms > 0 && imuSampleTime_ms - EKFGSF_yaw_reset_request_ms < YAW_RESET_TO_GSF_TIMEOUT_MS) {
+        // action an external reset request. Virtual Compass owns yaw when selected,
+        // so discard pending GSF yaw reset requests instead of overriding it.
+        if (yaw_source_last == AP_NavEKF_Source::SourceYaw::VIRTUAL_COMPASS) {
+            EKFGSF_yaw_reset_request_ms = 0;
+        } else if (EKFGSF_yaw_reset_request_ms > 0 && imuSampleTime_ms - EKFGSF_yaw_reset_request_ms < YAW_RESET_TO_GSF_TIMEOUT_MS) {
             EKFGSF_resetMainFilterYaw(true);
         }
     } else {
@@ -864,5 +867,10 @@ void NavEKF3_core::runYawEstimatorCorrection()
 // request times out after YAW_RESET_TO_GSF_TIMEOUT_MS if it cannot be actioned
 void NavEKF3_core::EKFGSF_requestYawReset()
 {
+    // Virtual Compass is an explicit yaw source, so don't latch emergency
+    // requests that would reset yaw to the independent GSF estimate.
+    if (yaw_source_last == AP_NavEKF_Source::SourceYaw::VIRTUAL_COMPASS) {
+        return;
+    }
     EKFGSF_yaw_reset_request_ms = imuSampleTime_ms;
 }

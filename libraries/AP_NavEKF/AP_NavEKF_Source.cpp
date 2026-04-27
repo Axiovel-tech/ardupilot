@@ -54,7 +54,7 @@ const AP_Param::GroupInfo AP_NavEKF_Source::var_info[] = {
     // @Param: 1_YAW
     // @DisplayName: Yaw Source
     // @Description: Yaw Source
-    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF
+    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF, 9:VirtualCompass
     // @User: Advanced
     AP_GROUPINFO("1_YAW", 5, AP_NavEKF_Source, _source_set[0].yaw, (int8_t)AP_NavEKF_Source::SourceYaw::COMPASS),
 
@@ -90,7 +90,7 @@ const AP_Param::GroupInfo AP_NavEKF_Source::var_info[] = {
     // @Param: 2_YAW
     // @DisplayName: Yaw Source (Secondary)
     // @Description: Yaw Source (Secondary)
-    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF
+    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF, 9:VirtualCompass
     // @User: Advanced
     AP_GROUPINFO("2_YAW", 10, AP_NavEKF_Source, _source_set[1].yaw, (int8_t)AP_NavEKF_Source::SourceYaw::NONE),
 #endif
@@ -127,7 +127,7 @@ const AP_Param::GroupInfo AP_NavEKF_Source::var_info[] = {
     // @Param: 3_YAW
     // @DisplayName: Yaw Source (Tertiary)
     // @Description: Yaw Source (Tertiary)
-    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF
+    // @Values: 0:None, 1:Compass, 2:GPS, 3:GPS with Compass Fallback, 6:ExternalNav, 8:GSF, 9:VirtualCompass
     // @User: Advanced
     AP_GROUPINFO("3_YAW", 15, AP_NavEKF_Source, _source_set[2].yaw, (int8_t)AP_NavEKF_Source::SourceYaw::NONE),
 #endif
@@ -138,6 +138,15 @@ const AP_Param::GroupInfo AP_NavEKF_Source::var_info[] = {
     // @Bitmask: 0:FuseAllVelocities, 1:AlignExtNavPosWhenUsingOptFlow
     // @User: Advanced
     AP_GROUPINFO("_OPTIONS", 16, AP_NavEKF_Source, _options, (int16_t)SourceOptions::FUSE_ALL_VELOCITIES),
+
+    // @Param: _VC_YAW
+    // @DisplayName: Virtual Compass Initial Yaw
+    // @Description: Initial yaw angle used when the VirtualCompass yaw source is first initialised. The virtual compass then follows gyro-propagated EKF yaw while armed and freezes the last heading when disarmed.
+    // @Units: deg
+    // @Range: 0 360
+    // @Increment: 1
+    // @User: Advanced
+    AP_GROUPINFO("_VC_YAW", 17, AP_NavEKF_Source, _vcompass_yaw_deg, 0.0f),
 
     AP_GROUPEND
 };
@@ -232,6 +241,12 @@ AP_NavEKF_Source::SourceYaw AP_NavEKF_Source::getYawSource() const
     }
 
     return _source_set[active_source_set].yaw;
+}
+
+// get the virtual compass initial yaw angle in radians
+float AP_NavEKF_Source::getVirtualCompassInitialYawRad() const
+{
+    return radians(wrap_360(_vcompass_yaw_deg.get()));
 }
 
 // get pos Z source
@@ -432,6 +447,7 @@ bool AP_NavEKF_Source::pre_arm_check(bool requires_position, char *failure_msg, 
         switch ((SourceYaw)_source_set[i].yaw.get()) {
         case SourceYaw::NONE:
         case SourceYaw::GPS:
+        case SourceYaw::VIRTUAL_COMPASS:
             // valid yaw value
             break;
         case SourceYaw::COMPASS:

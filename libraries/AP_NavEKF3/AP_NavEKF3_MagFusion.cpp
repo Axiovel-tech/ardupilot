@@ -219,6 +219,46 @@ void NavEKF3_core::alignYawAngle(const yaw_elements &yawAngData)
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "EKF3 IMU%u yaw aligned",(unsigned)imu_index);
 }
 
+void NavEKF3_core::updateVirtualCompassYaw()
+{
+    if (!virtualCompassYawInitialised) {
+        virtualCompassYaw = frontend->sources.getVirtualCompassInitialYawRad();
+        virtualCompassYawInitialised = true;
+    }
+
+    // While armed, the virtual compass follows the gyro-propagated EKF yaw. On the
+    // disarm transition, capture the final propagated yaw and hold it until the
+    // next arming.
+    if (yawAlignComplete && (motorsArmed || virtualCompassWasArmed)) {
+        rotationOrder order;
+        bestRotationOrder(order);
+        if (order == rotationOrder::TAIT_BRYAN_321) {
+            Vector3F euler321;
+            stateStruct.quat.to_euler(euler321.x, euler321.y, euler321.z);
+            virtualCompassYaw = euler321.z;
+        } else {
+            virtualCompassYaw = stateStruct.quat.to_vector312().z;
+        }
+    }
+
+    virtualCompassWasArmed = motorsArmed;
+}
+
+bool NavEKF3_core::getVirtualCompassYawData(yaw_elements &yawAngData)
+{
+    if (!virtualCompassYawInitialised) {
+        return false;
+    }
+
+    bestRotationOrder(yawAngData.order);
+    yawAngData.yawAng = virtualCompassYaw;
+    // Once disarmed, make the frozen virtual yaw source strong enough to reject
+    // gyro drift without resetting the yaw state.
+    yawAngData.yawAngErr = motorsArmed ? MAX(frontend->_yawNoise, 0.05f) : 0.01f;
+    yawAngData.time_ms = imuDataDelayed.time_ms;
+    return true;
+}
+
 /********************************************************
 *                   FUSE MEASURED_DATA                  *
 ********************************************************/
@@ -243,6 +283,27 @@ void NavEKF3_core::SelectMagFusion()
         }
         yawAngDataStatic.yawAngErr = MAX(frontend->_yawNoise, 0.05f);
         yawAngDataStatic.time_ms = imuDataDelayed.time_ms;
+    }
+
+    // Handle the virtual compass yaw source. It uses the configured initial yaw
+    // angle for first alignment, follows gyro-propagated yaw while armed, and
+    // freezes the last heading when disarmed.
+    if (yaw_source_last == AP_NavEKF_Source::SourceYaw::VIRTUAL_COMPASS) {
+        updateVirtualCompassYaw();
+        if (tiltAlignComplete && getVirtualCompassYawData(yawAngDataVirtualCompass)) {
+            if (!yawAlignComplete || yaw_source_reset) {
+                alignYawAngle(yawAngDataVirtualCompass);
+                yaw_source_reset = false;
+                recordYawResetsCompleted();
+                lastSynthYawTime_ms = imuSampleTime_ms;
+            } else if (imuSampleTime_ms - lastSynthYawTime_ms > 140) {
+                fuseEulerYaw(yawFusionMethod::VIRTUAL_COMPASS);
+                lastSynthYawTime_ms = imuSampleTime_ms;
+            }
+        }
+        magTestRatio.zero();
+        yawTestRatio = 0.0f;
+        return;
     }
 
     // Handle case where we are not using a yaw sensor of any type and attempt to reset the yaw in
@@ -946,6 +1007,10 @@ bool NavEKF3_core::fuseEulerYaw(yawFusionMethod method)
         R_YAW = sq(yawAngDataStatic.yawAngErr);
         break;
 
+    case yawFusionMethod::VIRTUAL_COMPASS:
+        R_YAW = sq(yawAngDataVirtualCompass.yawAngErr);
+        break;
+
     case yawFusionMethod::MAGNETOMETER:
     case yawFusionMethod::PREDICTED:
     default:
@@ -968,6 +1033,10 @@ bool NavEKF3_core::fuseEulerYaw(yawFusionMethod method)
 
     case yawFusionMethod::STATIC:
         order = yawAngDataStatic.order;
+        break;
+
+    case yawFusionMethod::VIRTUAL_COMPASS:
+        order = yawAngDataVirtualCompass.order;
         break;
 
     case yawFusionMethod::MAGNETOMETER:
@@ -1131,6 +1200,10 @@ bool NavEKF3_core::fuseEulerYaw(yawFusionMethod method)
 
     case yawFusionMethod::STATIC:
         innovYaw = wrap_PI(yawAngPredicted - yawAngDataStatic.yawAng);
+        break;
+
+    case yawFusionMethod::VIRTUAL_COMPASS:
+        innovYaw = wrap_PI(yawAngPredicted - yawAngDataVirtualCompass.yawAng);
         break;
 
     case yawFusionMethod::GSF:
