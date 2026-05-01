@@ -2235,8 +2235,10 @@ void NavEKF3_core::verifyTiltErrorVariance()
  */
 void NavEKF3_core::moveEKFOrigin(void)
 {
-    // only move origin when we have a origin and we're using GPS
-    if (!frontend->common_origin_valid || !filterStatus.flags.using_gps) {
+    // only move origin when we have a origin and GPS is the active horizontal position source
+    if (!frontend->common_origin_valid ||
+        !filterStatus.flags.using_gps ||
+        frontend->sources.getPosXYSource() != AP_NavEKF_Source::SourceXY::GPS) {
         return;
     }
 
