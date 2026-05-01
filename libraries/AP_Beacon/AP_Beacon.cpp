@@ -261,6 +261,14 @@ void AP_Beacon::update(void)
     }
     _driver->update();
 
+    const uint32_t now_ms = AP_HAL::millis();
+    for (uint8_t i = 0; i < num_tdoa; i++) {
+        auto &tdoa = tdoa_state[i];
+        if (tdoa.healthy && now_ms - tdoa.update_ms > AP_BEACON_TIMEOUT_MS) {
+            tdoa.healthy = false;
+        }
+    }
+
     // update boundary for fence
     update_boundary_points();
 }
@@ -385,6 +393,9 @@ bool AP_Beacon::get_tdoa_data(uint8_t tdoa_instance, struct TDoAState& state) co
         return false;
     }
     state = tdoa_state[tdoa_instance];
+    if (state.healthy && AP_HAL::millis() - state.update_ms > AP_BEACON_TIMEOUT_MS) {
+        state.healthy = false;
+    }
     return true;
 }
 

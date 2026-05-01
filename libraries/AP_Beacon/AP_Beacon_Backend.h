@@ -46,7 +46,10 @@ public:
     // pos should be in meters in NED from the beacon's local origin
     void set_beacon_position(uint8_t beacon_instance, const Vector3f& pos);
 
-    // set a TDoA range-difference measurement between two beacons
+    // set a TDoA range-difference measurement between two beacons.
+    // distance_diff is distance(anchor_id_b) - distance(anchor_id_a), in meters.
+    // anchor positions must be populated with set_beacon_position(), even for TDoA-only backends.
+    // anchor order is normalized internally, with distance_diff sign adjusted to match.
     void set_tdoa_measurement(uint8_t anchor_id_a, uint8_t anchor_id_b, float distance_diff, float distance_diff_err);
 
     float get_beacon_origin_lat(void) const { return _frontend.origin_lat; }

@@ -56,6 +56,7 @@ public:
     };
 
     // TDoA range-difference measurement between two anchors.
+    // distance_diff is distance(anchor_id_b) - distance(anchor_id_a), in meters.
     struct TDoAState {
         uint8_t anchor_id_a;             // first anchor index
         uint8_t anchor_id_b;             // second anchor index

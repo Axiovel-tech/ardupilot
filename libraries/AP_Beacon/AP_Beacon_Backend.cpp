@@ -94,11 +94,17 @@ void AP_Beacon_Backend::set_tdoa_measurement(uint8_t anchor_id_a, uint8_t anchor
         return;
     }
 
+    if (anchor_id_b < anchor_id_a) {
+        const uint8_t anchor_id_tmp = anchor_id_a;
+        anchor_id_a = anchor_id_b;
+        anchor_id_b = anchor_id_tmp;
+        distance_diff = -distance_diff;
+    }
+
     uint8_t instance = _frontend.num_tdoa;
     for (uint8_t i = 0; i < _frontend.num_tdoa; i++) {
         const auto &state = _frontend.tdoa_state[i];
-        if ((state.anchor_id_a == anchor_id_a && state.anchor_id_b == anchor_id_b) ||
-            (state.anchor_id_a == anchor_id_b && state.anchor_id_b == anchor_id_a)) {
+        if (state.anchor_id_a == anchor_id_a && state.anchor_id_b == anchor_id_b) {
             instance = i;
             break;
         }
