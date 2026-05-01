@@ -85,6 +85,114 @@ const AP_Param::GroupInfo AP_Beacon::var_info[] = {
     // @Values: 0:Range,1:TDoA
     // @User: Advanced
     AP_GROUPINFO("_SITL_MODE", 5, AP_Beacon, sitl_mode, 0),
+
+    // @Param: _TDOA_NOISE
+    // @DisplayName: SITL TDoA noise
+    // @Description: SITL TDoA range-difference Gaussian noise standard deviation. This corrupts generated TDoA samples; estimator weighting still uses the reported TDoA measurement error and EK3_BCN_M_NSE minimum variance handling.
+    // @Units: m
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_NOISE", 6, AP_Beacon, sitl_tdoa_noise_m_param, 0),
+
+    // @Param: _TDOA_BIAS
+    // @DisplayName: SITL TDoA bias
+    // @Description: SITL TDoA range-difference constant bias
+    // @Units: m
+    // @Range: -100 100
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_BIAS", 7, AP_Beacon, sitl_tdoa_bias_m_param, 0),
+
+    // @Param: _TDOA_DROPOUT
+    // @DisplayName: SITL TDoA dropout rate
+    // @Description: SITL TDoA measurement dropout percentage
+    // @Units: %
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_DROPOUT", 8, AP_Beacon, sitl_tdoa_dropout_pct_param, 0),
+
+    // @Param: _TDOA_OUT_PCT
+    // @DisplayName: SITL TDoA outlier rate
+    // @Description: SITL TDoA outlier percentage
+    // @Units: %
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_OUT_PCT", 9, AP_Beacon, sitl_tdoa_outlier_pct_param, 0),
+
+    // @Param: _TDOA_OUT_MAG
+    // @DisplayName: SITL TDoA outlier magnitude
+    // @Description: SITL TDoA absolute outlier magnitude
+    // @Units: m
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_OUT_MAG", 10, AP_Beacon, sitl_tdoa_outlier_m_param, 0),
+
+    // @Param: _TDOA_SEED
+    // @DisplayName: SITL TDoA random seed
+    // @Description: SITL TDoA deterministic random seed
+    // @User: Advanced
+    AP_GROUPINFO("_TDOA_SEED", 11, AP_Beacon, sitl_tdoa_seed_param, 1),
+
+    // @Param: _RNG_NOISE
+    // @DisplayName: SITL range noise
+    // @Description: SITL range Gaussian noise standard deviation. This corrupts generated range samples; range beacon estimator weighting comes from EK3_BCN_M_NSE.
+    // @Units: m
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_NOISE", 12, AP_Beacon, sitl_rng_noise_m_param, 0),
+
+    // @Param: _RNG_BIAS
+    // @DisplayName: SITL range bias
+    // @Description: SITL range constant bias
+    // @Units: m
+    // @Range: -100 100
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_BIAS", 13, AP_Beacon, sitl_rng_bias_m_param, 0),
+
+    // @Param: _RNG_DROPOUT
+    // @DisplayName: SITL range dropout rate
+    // @Description: SITL range measurement dropout percentage
+    // @Units: %
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_DROPOUT", 14, AP_Beacon, sitl_rng_dropout_pct_param, 0),
+
+    // @Param: _RNG_OUT_PCT
+    // @DisplayName: SITL range outlier rate
+    // @Description: SITL range outlier percentage
+    // @Units: %
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_OUT_PCT", 15, AP_Beacon, sitl_rng_outlier_pct_param, 0),
+
+    // @Param: _RNG_OUT_MAG
+    // @DisplayName: SITL range outlier magnitude
+    // @Description: SITL range absolute outlier magnitude
+    // @Units: m
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_OUT_MAG", 16, AP_Beacon, sitl_rng_outlier_m_param, 0),
+
+    // @Param: _RNG_SEED
+    // @DisplayName: SITL range random seed
+    // @Description: SITL range deterministic random seed
+    // @User: Advanced
+    AP_GROUPINFO("_RNG_SEED", 17, AP_Beacon, sitl_rng_seed_param, 1),
+
+    // @Param: _SITL_POS
+    // @DisplayName: SITL vehicle position estimate
+    // @Description: Controls whether the SITL beacon backend publishes a vehicle position estimate. StartupOnly publishes near the origin altitude for initial alignment and then latches off until reboot.
+    // @Values: 0:Disabled,1:Continuous,2:StartupOnly
+    // @Range: 0 2
+    // @User: Advanced
+    AP_GROUPINFO("_SITL_POS", 18, AP_Beacon, sitl_position_estimate_param, 1),
+
+    // @Param: _SITL_GEOM
+    // @DisplayName: SITL beacon geometry
+    // @Description: Controls the SITL beacon anchor geometry. Cube8 is a 20m cube centered on the beacon origin, with anchors at +/-10m N/E/D.
+    // @Values: 0:Rectangle4,1:Cube8
+    // @Range: 0 1
+    // @User: Advanced
+    AP_GROUPINFO("_SITL_GEOM", 19, AP_Beacon, sitl_geometry_param, 0),
 #endif
 
     AP_GROUPEND

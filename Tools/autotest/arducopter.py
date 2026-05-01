@@ -7943,7 +7943,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             if m.lat != 0 or m.lon != 0:
                 return m
 
-    def BeaconPosition(self, sitl_mode=0, assert_tdoa=False, track_time=20, force_disarm_after=True, assert_logs=True, fly=True):
+    def BeaconPosition(self, sitl_mode=0, assert_tdoa=False, track_time=20, force_disarm_after=True, assert_logs=True, fly=True, extra_params=None, position_max_delta=1):
         '''Fly Beacon Position'''
         self.reboot_sitl()
 
@@ -7952,7 +7952,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         old_pos = self.get_global_position_int()
         print("old_pos=%s" % str(old_pos))
 
-        self.set_parameters({
+        params = {
             "BCN_TYPE": 10,
             "BCN_SITL_MODE": sitl_mode,
             "BCN_LATITUDE": SITL_START_LOCATION.lat,
@@ -7968,7 +7968,10 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             "EK3_SRC1_VELZ": 0,  # None
             "EK2_ENABLE": 0,
             "AHRS_EKF_TYPE": 3,
-        })
+        }
+        if extra_params is not None:
+            params.update(extra_params)
+        self.set_parameters(params)
         self.reboot_sitl()
 
         # turn off GPS arming checks.  This may be considered a
@@ -7992,7 +7995,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.progress("Fetching location")
             new_pos = self.get_global_position_int()
             pos_delta = self.get_distance_int(old_pos, new_pos)
-            max_delta = 1
+            max_delta = position_max_delta
             self.progress("delta=%u want <= %u" % (pos_delta, max_delta))
             if pos_delta <= max_delta:
                 break
@@ -8025,6 +8028,20 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
     def BeaconTDoAPosition(self):
         '''Fly Beacon Position using SITL TDoA measurements'''
         self.BeaconPosition(sitl_mode=1, assert_tdoa=True)
+
+    def BeaconTDoACubePosition(self):
+        '''Fly Beacon Position using 8-anchor SITL TDoA measurements'''
+        self.BeaconPosition(
+            sitl_mode=1,
+            assert_tdoa=True,
+            track_time=12,
+            position_max_delta=5,
+            extra_params={
+                "BCN_SITL_GEOM": 1,
+                "BCN_SITL_POS": 2,
+                "EK3_BCN_M_NSE": 0.15,
+                "EK3_SRC1_POSZ": 4,
+            })
 
     def AC_Avoidance_Beacon(self):
         '''Test beacon avoidance slide behaviour'''
@@ -11077,6 +11094,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         ret = ([
              self.BeaconPosition,
              self.BeaconTDoAPosition,
+             self.BeaconTDoACubePosition,
              self.ReplayBeaconTDoA,
              self.RTLSpeed,
              self.Mount,

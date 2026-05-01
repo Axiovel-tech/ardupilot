@@ -54,6 +54,20 @@ public:
     float get_beacon_origin_alt(void) const { return _frontend.origin_alt; }
 #if AP_BEACON_SITL_ENABLED
     uint8_t get_sitl_measurement_mode(void) const { return _frontend.sitl_measurement_mode(); }
+    float get_sitl_tdoa_noise(void) const { return _frontend.sitl_tdoa_noise(); }
+    float get_sitl_tdoa_bias(void) const { return _frontend.sitl_tdoa_bias(); }
+    float get_sitl_tdoa_dropout_pct(void) const { return _frontend.sitl_tdoa_dropout_pct(); }
+    float get_sitl_tdoa_outlier_pct(void) const { return _frontend.sitl_tdoa_outlier_pct(); }
+    float get_sitl_tdoa_outlier_m(void) const { return _frontend.sitl_tdoa_outlier_m(); }
+    int32_t get_sitl_tdoa_seed(void) const { return _frontend.sitl_tdoa_seed(); }
+    float get_sitl_rng_noise(void) const { return _frontend.sitl_rng_noise(); }
+    float get_sitl_rng_bias(void) const { return _frontend.sitl_rng_bias(); }
+    float get_sitl_rng_dropout_pct(void) const { return _frontend.sitl_rng_dropout_pct(); }
+    float get_sitl_rng_outlier_pct(void) const { return _frontend.sitl_rng_outlier_pct(); }
+    float get_sitl_rng_outlier_m(void) const { return _frontend.sitl_rng_outlier_m(); }
+    int32_t get_sitl_rng_seed(void) const { return _frontend.sitl_rng_seed(); }
+    uint8_t get_sitl_position_estimate_mode(void) const { return _frontend.sitl_position_estimate_mode(); }
+    uint8_t get_sitl_geometry(void) const { return _frontend.sitl_geometry(); }
 #endif
 
 protected:

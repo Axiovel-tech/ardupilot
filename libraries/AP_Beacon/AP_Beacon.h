@@ -114,6 +114,20 @@ public:
 
 #if AP_BEACON_SITL_ENABLED
     uint8_t sitl_measurement_mode() const { return (uint8_t)sitl_mode; }
+    float sitl_tdoa_noise() const { return sitl_tdoa_noise_m_param; }
+    float sitl_tdoa_bias() const { return sitl_tdoa_bias_m_param; }
+    float sitl_tdoa_dropout_pct() const { return sitl_tdoa_dropout_pct_param; }
+    float sitl_tdoa_outlier_pct() const { return sitl_tdoa_outlier_pct_param; }
+    float sitl_tdoa_outlier_m() const { return sitl_tdoa_outlier_m_param; }
+    int32_t sitl_tdoa_seed() const { return sitl_tdoa_seed_param; }
+    float sitl_rng_noise() const { return sitl_rng_noise_m_param; }
+    float sitl_rng_bias() const { return sitl_rng_bias_m_param; }
+    float sitl_rng_dropout_pct() const { return sitl_rng_dropout_pct_param; }
+    float sitl_rng_outlier_pct() const { return sitl_rng_outlier_pct_param; }
+    float sitl_rng_outlier_m() const { return sitl_rng_outlier_m_param; }
+    int32_t sitl_rng_seed() const { return sitl_rng_seed_param; }
+    uint8_t sitl_position_estimate_mode() const { return constrain_int16(sitl_position_estimate_param, 0, 2); }
+    uint8_t sitl_geometry() const { return sitl_geometry_param == 1 ? 1 : 0; }
 #endif
 
     // update fence boundary array
@@ -150,6 +164,20 @@ private:
     AP_Int16 orient_yaw;
 #if AP_BEACON_SITL_ENABLED
     AP_Int8 sitl_mode;
+    AP_Float sitl_tdoa_noise_m_param;
+    AP_Float sitl_tdoa_bias_m_param;
+    AP_Float sitl_tdoa_dropout_pct_param;
+    AP_Float sitl_tdoa_outlier_pct_param;
+    AP_Float sitl_tdoa_outlier_m_param;
+    AP_Int32 sitl_tdoa_seed_param;
+    AP_Float sitl_rng_noise_m_param;
+    AP_Float sitl_rng_bias_m_param;
+    AP_Float sitl_rng_dropout_pct_param;
+    AP_Float sitl_rng_outlier_pct_param;
+    AP_Float sitl_rng_outlier_m_param;
+    AP_Int32 sitl_rng_seed_param;
+    AP_Int8 sitl_position_estimate_param;
+    AP_Int8 sitl_geometry_param;
 #endif
 
     // external references
