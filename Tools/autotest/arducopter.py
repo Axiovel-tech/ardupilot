@@ -8021,6 +8021,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.assert_current_onboard_log_contains_message("BCN")
             if assert_tdoa:
                 self.assert_current_onboard_log_contains_message("BCNT")
+                self.assert_current_onboard_log_contains_message("XKTD")
 
         if force_disarm_after:
             self.disarm_vehicle(force=True)

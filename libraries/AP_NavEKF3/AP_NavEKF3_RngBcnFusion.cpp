@@ -477,14 +477,15 @@ void NavEKF3_core::FuseTDoABcn()
         }
     }
 
-    if (rngBcn.tdoaDataDelayed.anchor_id_a < rngBcn.numFusionReports) {
-        auto &report = rngBcn.fusionReport[rngBcn.tdoaDataDelayed.anchor_id_a];
-        report.beaconPosNED = rngBcn.tdoaDataDelayed.beacon_pos_b_NED;
-        report.innov = rngBcn.innov;
-        report.innovVar = rngBcn.varInnov;
-        report.rng = rngBcn.tdoaDataDelayed.distance_diff;
-        report.testRatio = rngBcn.testRatio;
-    }
+    auto &report = rngBcn.tdoaFusionReport;
+    report.valid = true;
+    report.healthy = rngBcn.health;
+    report.anchor_id_a = rngBcn.tdoaDataDelayed.anchor_id_a;
+    report.anchor_id_b = rngBcn.tdoaDataDelayed.anchor_id_b;
+    report.distance_diff = rngBcn.tdoaDataDelayed.distance_diff;
+    report.innov = rngBcn.innov;
+    report.innovVar = rngBcn.varInnov;
+    report.testRatio = rngBcn.testRatio;
 }
 
 /*

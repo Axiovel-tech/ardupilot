@@ -1443,6 +1443,17 @@ private:
         } *fusionReport;
         uint8_t numFusionReports;
 
+        struct TDoAFusionReport {
+            bool valid;         // true when the report contains a TDoA fusion attempt not yet logged
+            bool healthy;       // true when the TDoA measurement passed fusion consistency checks
+            uint8_t anchor_id_a;// first TDoA anchor ID
+            uint8_t anchor_id_b;// second TDoA anchor ID
+            ftype distance_diff;// measured distance(anchor_id_b) - distance(anchor_id_a), in meters
+            ftype innov;        // TDoA range-difference innovation (m)
+            ftype innovVar;     // innovation variance (m^2)
+            ftype testRatio;    // innovation consistency test ratio
+        } tdoaFusionReport;
+
         AP_DAL &dal;
     } rngBcn{dal};
 #endif  // if EK3_FEATURE_BEACON_FUSION
@@ -1663,6 +1674,7 @@ private:
     void Log_Write_XKFS(uint64_t time_us) const;
     void Log_Write_Quaternion(uint64_t time_us) const;
     void Log_Write_Beacon(uint64_t time_us);
+    void Log_Write_TDoABeacon(uint64_t time_us);
     void Log_Write_BodyOdom(uint64_t time_us);
     void Log_Write_State_Variances(uint64_t time_us);
     void Log_Write_Timing(uint64_t time_us);
