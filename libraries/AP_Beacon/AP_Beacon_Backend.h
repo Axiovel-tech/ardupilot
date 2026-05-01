@@ -46,9 +46,15 @@ public:
     // pos should be in meters in NED from the beacon's local origin
     void set_beacon_position(uint8_t beacon_instance, const Vector3f& pos);
 
+    // set a TDoA range-difference measurement between two beacons
+    void set_tdoa_measurement(uint8_t anchor_id_a, uint8_t anchor_id_b, float distance_diff, float distance_diff_err);
+
     float get_beacon_origin_lat(void) const { return _frontend.origin_lat; }
     float get_beacon_origin_lon(void) const { return _frontend.origin_lon; }
     float get_beacon_origin_alt(void) const { return _frontend.origin_alt; }
+#if AP_BEACON_SITL_ENABLED
+    uint8_t get_sitl_measurement_mode(void) const { return _frontend.sitl_measurement_mode(); }
+#endif
 
 protected:
 

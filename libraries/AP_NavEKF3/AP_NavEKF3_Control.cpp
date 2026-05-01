@@ -599,7 +599,7 @@ bool NavEKF3_core::readyToUseRangeBeacon(void) const
         return false;
     }
 
-    return tiltAlignComplete && yawAlignComplete && delAngBiasLearned && rngBcn.alignmentCompleted && rngBcn.dataToFuse;
+    return tiltAlignComplete && yawAlignComplete && delAngBiasLearned && rngBcn.alignmentCompleted && (rngBcn.dataToFuse || rngBcn.tdoaDataToFuse);
 #else
     return false;
 #endif  // EK3_FEATURE_BEACON_FUSION

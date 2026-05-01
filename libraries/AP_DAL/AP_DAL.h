@@ -314,6 +314,14 @@ public:
         _beacon->handle_message(msg);
 #endif
     }
+    void handle_message(const log_RBTD &msg) {
+#if AP_BEACON_ENABLED
+        if (_beacon == nullptr) {
+            _beacon = NEW_NOTHROW AP_DAL_Beacon;
+        }
+        _beacon->handle_message(msg);
+#endif
+    }
     void handle_message(const log_RVOH &msg) {
 #if HAL_VISUALODOM_ENABLED
         if (_visualodom == nullptr) {
@@ -404,4 +412,3 @@ namespace AP {
 
 // replay printf for debugging
 void rprintf(const char *format, ...);
-

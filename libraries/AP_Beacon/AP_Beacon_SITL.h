@@ -22,6 +22,7 @@ public:
 private:
     SITL::SIM *sitl;
     uint8_t next_beacon;
+    uint8_t next_tdoa_pair;
     uint32_t last_update_ms;
 };
 

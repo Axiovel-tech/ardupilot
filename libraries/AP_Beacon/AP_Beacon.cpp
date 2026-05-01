@@ -78,6 +78,15 @@ const AP_Param::GroupInfo AP_Beacon::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("_ORIENT_YAW", 4, AP_Beacon, orient_yaw, 0),
 
+#if AP_BEACON_SITL_ENABLED
+    // @Param: _SITL_MODE
+    // @DisplayName: SITL beacon measurement mode
+    // @Description: Selects range or TDoA measurements for the SITL beacon backend
+    // @Values: 0:Range,1:TDoA
+    // @User: Advanced
+    AP_GROUPINFO("_SITL_MODE", 5, AP_Beacon, sitl_mode, 0),
+#endif
+
     AP_GROUPEND
 };
 
@@ -250,6 +259,25 @@ uint32_t AP_Beacon::beacon_last_update_ms(uint8_t beacon_instance) const
         return 0;
     }
     return beacon_state[beacon_instance].distance_update_ms;
+}
+
+// return number of TDoA anchor-pair measurements
+uint8_t AP_Beacon::tdoa_count() const
+{
+    if (!device_ready()) {
+        return 0;
+    }
+    return num_tdoa;
+}
+
+// return TDoA data for an anchor pair measurement instance
+bool AP_Beacon::get_tdoa_data(uint8_t tdoa_instance, struct TDoAState& state) const
+{
+    if (!device_ready() || tdoa_instance >= num_tdoa) {
+        return false;
+    }
+    state = tdoa_state[tdoa_instance];
+    return true;
 }
 
 // create fence boundary points
@@ -427,6 +455,20 @@ void AP_Beacon::log()
        posz            : pos.z
     };
     AP::logger().WriteBlock(&pkt_beacon, sizeof(pkt_beacon));
+
+    for (uint8_t i = 0; i < num_tdoa; i++) {
+        const auto &tdoa = tdoa_state[i];
+        const struct log_BeaconTDoA pkt_tdoa{
+            LOG_PACKET_HEADER_INIT(LOG_BEACON_TDOA_MSG),
+            time_us            : AP_HAL::micros64(),
+            anchor_id_a        : tdoa.anchor_id_a,
+            anchor_id_b        : tdoa.anchor_id_b,
+            distance_diff      : tdoa.distance_diff,
+            distance_diff_err  : tdoa.distance_diff_err,
+            healthy            : (uint8_t)tdoa.healthy
+        };
+        AP::logger().WriteBlock(&pkt_tdoa, sizeof(pkt_tdoa));
+    }
 }
 #endif
 

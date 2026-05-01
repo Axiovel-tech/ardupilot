@@ -142,6 +142,9 @@ bool NavEKF3_core::setup_core(uint8_t _imu_index, uint8_t _core_index)
     if(dal.beacon() && !rngBcn.storedRange.init(imu_buffer_length+1)) {
         return false;
     }
+    if(dal.beacon() && !rngBcn.storedTDoA.init(imu_buffer_length+1)) {
+        return false;
+    }
 #endif
 #if EK3_FEATURE_EXTERNAL_NAV
     if (frontend->sources.ext_nav_enabled() && !storedExtNav.init(extnav_buffer_length)) {
@@ -408,6 +411,7 @@ void NavEKF3_core::InitialiseVariables()
     storedOutput.reset();
 #if EK3_FEATURE_BEACON_FUSION
     rngBcn.storedRange.reset();
+    rngBcn.storedTDoA.reset();
 #endif
 #if EK3_FEATURE_BODY_ODOM
     storedBodyOdm.reset();

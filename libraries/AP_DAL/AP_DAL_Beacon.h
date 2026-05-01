@@ -47,6 +47,25 @@ public:
         return _RBCI[i].position;
     }
 
+    uint8_t tdoa_count() const {
+        return _tdoa_count;
+    }
+
+    bool get_tdoa_data(uint8_t i, AP_Beacon::TDoAState &state) const {
+        if (i >= _tdoa_count) {
+            return false;
+        }
+
+        const log_RBTD &RBTD = _RBTD[i];
+        state.anchor_id_a = RBTD.anchor_id_a;
+        state.anchor_id_b = RBTD.anchor_id_b;
+        state.distance_diff = RBTD.distance_diff;
+        state.distance_diff_err = RBTD.distance_diff_err;
+        state.healthy = RBTD.healthy;
+        state.update_ms = RBTD.last_update_ms;
+        return true;
+    }
+
     // return vehicle position in NED from position estimate system's origin in meters
     bool get_vehicle_position_ned(Vector3f& pos, float& accuracy_estimate) const {
         pos = _RBCH.vehicle_position_ned;
@@ -67,13 +86,25 @@ public:
         _RBCH = msg;
     }
     void handle_message(const log_RBCI &msg) {
-        _RBCI[msg.instance] = msg;
+        if (msg.instance < ARRAY_SIZE(_RBCI)) {
+            _RBCI[msg.instance] = msg;
+        }
+    }
+    void handle_message(const log_RBTD &msg) {
+        if (msg.instance < ARRAY_SIZE(_RBTD)) {
+            _RBTD[msg.instance] = msg;
+            if (msg.instance + 1 > _tdoa_count) {
+                _tdoa_count = msg.instance + 1;
+            }
+        }
     }
 
 private:
 
     struct log_RBCH _RBCH;
     struct log_RBCI _RBCI[AP_BEACON_MAX_BEACONS];
+    struct log_RBTD _RBTD[AP_BEACON_MAX_TDOA_MEASUREMENTS];
+    uint8_t _tdoa_count = 0;
 };
 
 #endif  // AP_BEACON_ENABLED

@@ -55,6 +55,16 @@ public:
         Vector3f position;      // location of beacon as an offset from origin in NED in meters
     };
 
+    // TDoA range-difference measurement between two anchors.
+    struct TDoAState {
+        uint8_t anchor_id_a;             // first anchor index
+        uint8_t anchor_id_b;             // second anchor index
+        bool healthy;                    // true if measurement is healthy
+        float distance_diff;             // distance(anchor_b) - distance(anchor_a), in meters
+        float distance_diff_err;         // 1-sigma error of distance difference, in meters
+        uint32_t update_ms;              // system time of last update from this anchor pair
+    };
+
     // initialise any available position estimators
     void init(void);
 
@@ -96,6 +106,16 @@ public:
     // return last update time from beacon in milliseconds
     uint32_t beacon_last_update_ms(uint8_t beacon_instance) const;
 
+    // return number of TDoA anchor-pair measurements
+    uint8_t tdoa_count() const;
+
+    // return TDoA data for an anchor pair measurement instance
+    bool get_tdoa_data(uint8_t tdoa_instance, struct TDoAState& state) const;
+
+#if AP_BEACON_SITL_ENABLED
+    uint8_t sitl_measurement_mode() const { return (uint8_t)sitl_mode; }
+#endif
+
     // update fence boundary array
     void update_boundary_points();
 
@@ -128,6 +148,9 @@ private:
     AP_Float origin_lon;
     AP_Float origin_alt;
     AP_Int16 orient_yaw;
+#if AP_BEACON_SITL_ENABLED
+    AP_Int8 sitl_mode;
+#endif
 
     // external references
     AP_Beacon_Backend *_driver;
@@ -140,6 +163,8 @@ private:
     // individual beacon data
     uint8_t num_beacons = 0;
     BeaconState beacon_state[AP_BEACON_MAX_BEACONS];
+    uint8_t num_tdoa = 0;
+    TDoAState tdoa_state[AP_BEACON_MAX_TDOA_MEASUREMENTS];
 
     // fence boundary
     Vector2f boundary[AP_BEACON_MAX_BEACONS+1]; // array of boundary points (used for fence)
