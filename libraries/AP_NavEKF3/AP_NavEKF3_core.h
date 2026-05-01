@@ -33,7 +33,6 @@
 #include <AP_NavEKF/EKF_Buffer.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
 #include <AP_RangeFinder/AP_RangeFinder.h>
-#include <AP_Beacon/AP_Beacon_config.h>
 
 #include "AP_NavEKF/EKFGSF_yaw.h"
 
@@ -621,7 +620,6 @@ private:
         ftype       distance_diff_err;   // range-difference measurement error 1-std (m)
         uint8_t     anchor_id_a;         // first beacon anchor identifier
         uint8_t     anchor_id_b;         // second beacon anchor identifier
-        uint8_t     tdoa_ID;             // TDoA measurement instance
     };
 
     struct tas_elements : EKF_obs_element_t {

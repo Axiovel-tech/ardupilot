@@ -393,9 +393,6 @@ bool AP_Beacon::get_tdoa_data(uint8_t tdoa_instance, struct TDoAState& state) co
         return false;
     }
     state = tdoa_state[tdoa_instance];
-    if (state.healthy && AP_HAL::millis() - state.update_ms > AP_BEACON_TIMEOUT_MS) {
-        state.healthy = false;
-    }
     return true;
 }
 

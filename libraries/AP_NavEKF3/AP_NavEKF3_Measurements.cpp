@@ -993,7 +993,6 @@ void NavEKF3_core::readRngBcnData()
             tdoaBcnDataNew.beacon_pos_b_NED = beacon->beacon_position(tdoa.anchor_id_b).toftype();
             tdoaBcnDataNew.anchor_id_a = tdoa.anchor_id_a;
             tdoaBcnDataNew.anchor_id_b = tdoa.anchor_id_b;
-            tdoaBcnDataNew.tdoa_ID = tdoa_index;
 
             newTDoADataPushed = true;
             rngBcn.lastTDoAChecked = tdoa_index;

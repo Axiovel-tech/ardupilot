@@ -43,6 +43,7 @@ void NavEKF3_core::BeaconFusion::InitialiseVariables()
     posOffsetMinVar = 0.0f;
     minOffsetStateChangeFilt = 0.0f;
     fuseDataReportIndex = 0;
+    memset(&tdoaFusionReport, 0, sizeof(tdoaFusionReport));
     delete[] fusionReport;
     fusionReport = nullptr;
     numFusionReports = 0;
