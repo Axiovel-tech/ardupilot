@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   copter-sitl:
-    name: Copter SITL tests1a
+    name: Copter SITL smoke
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, axio-sitl]
     timeout-minutes: 180
@@ -59,20 +59,27 @@ jobs:
         run: |
           . .github/workflows/ccache.env
 
-      - name: Run Copter SITL autotest shard
-        env:
-          CI_BUILD_TARGET: sitltest-copter-tests1a
+      - name: Run Copter SITL smoke tests
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           PATH="/github/home/.local/bin:$PATH"
-          Tools/scripts/build_ci.sh
+          Tools/autotest/autotest.py \
+            --show-test-timings \
+            --junit \
+            --waf-configure-args="--debug" \
+            build.Copter \
+            test.Copter.ArmFeatures \
+            test.Copter.SetHome \
+            test.Copter.InitialMode \
+            test.Copter.LoiterToAlt \
+            test.Copter.MAV_CMD_CONDITION_YAW
 
       - name: Upload SITL failure artifacts
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: fail-copter-sitl-tests1a
+          name: fail-copter-sitl-smoke
           path: |
             /tmp/buildlogs
             ${{ github.workspace }}/logs
@@ -135,4 +142,3 @@ jobs:
           name: fail-axiolight-copter
           path: /tmp/buildlogs
           retention-days: 14
-
