@@ -1,8 +1,8 @@
 # Axiovel CI
 
 This fork intentionally does not run the full upstream ArduPilot CI matrix on
-pull requests. Automatic PR validation for `AVCopter-4.6` is limited to the
-Axiovel Copter workflow:
+pull requests. Automatic PR validation for branches whose name starts with
+`AVCopter` is limited to the Axiovel Copter workflow:
 
 - `Copter SITL smoke`
 - `AxioLight Copter build`

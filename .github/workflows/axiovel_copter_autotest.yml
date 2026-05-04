@@ -9,7 +9,8 @@ on:
       - reopened
       - ready_for_review
     branches:
-      - AVCopter-4.6
+      - 'AVCopter*'
+      - 'AVCopter/**'
 
 permissions:
   contents: read
