@@ -60,7 +60,7 @@ jobs:
         run: |
           . .github/workflows/ccache.env
 
-      - name: Run Copter SITL smoke tests
+      - name: Run Copter SITL tests
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -74,7 +74,8 @@ jobs:
             test.Copter.SetHome \
             test.Copter.InitialMode \
             test.Copter.LoiterToAlt \
-            test.Copter.MAV_CMD_CONDITION_YAW
+            test.Copter.MAV_CMD_CONDITION_YAW \
+            test.CopterAxio
 
       - name: Upload SITL failure artifacts
         uses: actions/upload-artifact@v4

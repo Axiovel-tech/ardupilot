@@ -354,6 +354,7 @@ tester_class_map = {
     "test.CopterTests1e": arducopter.AutoTestCopterTests1e, # 8m32s
     "test.CopterTests2a": arducopter.AutoTestCopterTests2a, # 8m23s
     "test.CopterTests2b": arducopter.AutoTestCopterTests2b, # 8m18s
+    "test.CopterAxio": arducopter.AutoTestCopterAxio,
     "test.Plane": arduplane.AutoTestPlane,
     "test.PlaneTests1a": arduplane.AutoTestPlaneTests1a,
     "test.PlaneTests1b": arduplane.AutoTestPlaneTests1b,

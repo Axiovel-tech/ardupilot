@@ -11136,6 +11136,14 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         ])
         return ret
 
+    def axio_tests(self):
+        '''return list of Axiovel Copter tests'''
+        return [
+             self.BeaconTDoAPosition,
+             self.BeaconTDoACubePosition,
+             self.ReplayBeaconTDoA,
+        ]
+
     def tests2a(self):
         '''return list of all tests'''
         ret = ([
@@ -12878,6 +12886,11 @@ class AutoTestCopterTests2a(AutoTestCopter):
 class AutoTestCopterTests2b(AutoTestCopter):
     def tests(self):
         return self.tests2b()
+
+
+class AutoTestCopterAxio(AutoTestCopter):
+    def tests(self):
+        return self.axio_tests()
 
 
 class AutoTestCAN(AutoTestCopter):
