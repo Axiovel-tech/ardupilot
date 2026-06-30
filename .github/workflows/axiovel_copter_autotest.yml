@@ -91,11 +91,17 @@ jobs:
           retention-days: 14
 
   axiolight-build:
-    name: AxioLight Copter build
+    name: AxioLight Copter build (${{ matrix.board }})
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, axio-sitl]
     timeout-minutes: 90
     container: ardupilot/ardupilot-dev-chibios:v0.1.3
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - AXIOLIGHT-REVA
+          - AXIOLIGHT-REVB
 
     steps:
       - uses: actions/checkout@v4
@@ -117,9 +123,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ${{ github.workflow }}-ccache-chibios-axiolight-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
+          key: ${{ github.workflow }}-ccache-chibios-${{ matrix.board }}-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
           restore-keys: |
-            ${{ github.workflow }}-ccache-chibios-axiolight-
+            ${{ github.workflow }}-ccache-chibios-${{ matrix.board }}-
             ${{ github.workflow }}-ccache-chibios-
 
       - name: Setup ccache
@@ -131,7 +137,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           PATH="/github/home/.local/bin:$PATH"
-          ./waf configure --board AXIOLIGHT
+          ./waf configure --board ${{ matrix.board }}
           ./waf copter
           ccache -s
           ccache -z
@@ -140,6 +146,6 @@ jobs:
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: fail-axiolight-copter
+          name: fail-axiolight-copter-${{ matrix.board }}
           path: /tmp/buildlogs
           retention-days: 14
