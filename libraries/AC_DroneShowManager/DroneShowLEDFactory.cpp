@@ -87,6 +87,12 @@ DroneShowLED* DroneShowLEDFactory::new_rgb_led_by_type(
             result = new DroneShowLED_NeoPixel_RGBW(channel, num_leds);
             break;
 
+        case DroneShowLEDType_NeoPixel_GRBW:
+            result = new DroneShowLED_NeoPixel_RGBW(
+                channel, num_leds, DroneShowLED_NeoPixel_RGBW::ByteOrder::GRBW
+            );
+            break;
+
         case DroneShowLEDType_Notify:
             result = new DroneShowLED_Notify();
             break;
