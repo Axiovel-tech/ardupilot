@@ -1,4 +1,4 @@
-# Default parameters for AXIOLIGHT
+# Default parameters for AXIOLIGHT-REVA
 # Full tuned parameter set from connected AXIOLIGHT, excluding vehicle-specific system ID
 # Source: board_param_backups/AXIOLIGHT_live_full_20260428-170605.param
 ACRO_BAL_PITCH,1.000000
