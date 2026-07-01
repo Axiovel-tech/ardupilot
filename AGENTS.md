@@ -21,16 +21,13 @@ The venv must provide `python` on `PATH` because some ArduPilot helper scripts
 use `#!/usr/bin/env python`. ChibiOS board builds also require the ARM embedded
 toolchain path above so `arm-none-eabi-*` tools are visible.
 
-One-time DroneCAN setup for this environment:
+If `dronecan` is missing during `waf`, install it from the primary checkout:
 
 ```bash
 cd "$AP_ROOT"
 . .venv-build/bin/activate
 python -m pip install 'setuptools<81' -e modules/DroneCAN/pydronecan
 ```
-
-Keep the editable DroneCAN install pointed at the primary checkout, not a
-temporary worktree, so removing a worktree does not break later builds.
 
 For normal ArduPilot bootloader uploads, use `./waf copter --upload` after
 configuring the target board.
