@@ -102,9 +102,18 @@ bool DroneShowLED_NeoPixel_RGBW::set_raw_rgbw(uint8_t red, uint8_t green, uint8_
             i++;
         }
 
-        serialLed->send(_chan);
-
         return true;
+    } else {
+        return false;
+    }
+}
+
+bool DroneShowLED_NeoPixel_RGBW::flush()
+{
+    AP_SerialLED* serialLed = AP_SerialLED::get_singleton();
+
+    if (serialLed) {
+        return serialLed->send(_chan);
     } else {
         return false;
     }

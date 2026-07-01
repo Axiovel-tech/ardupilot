@@ -546,29 +546,48 @@ void AC_DroneShowManager::_update_lights()
 
     _last_rgb_led_color = color;
 
-    if (_rgb_led) {
+    bool flush_needed[RGB_LED_OUTPUT_COUNT];
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        flush_needed[i] = false;
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        DroneShowLED* rgb_led = _rgb_leds[i];
+
+        if (!rgb_led) {
+            continue;
+        }
+
         // No need to test whether the RGB values or the gamma correction
         // changed because the LED classes do this on their own
-        _rgb_led->set_gamma(_params.led_specs[0].gamma);
+        rgb_led->set_gamma(_params.led_specs[i].gamma);
 
-        if (_rgb_led->supports_white_channel()) {
+        if (rgb_led->supports_white_channel()) {
             // Code path for LEDs that support a white channel
             sb_rgbw_conversion_t conv;
             sb_rgbw_color_t rgbw_color;
 
             if (enhance_brightness && color.red == color.green && color.green == color.blue) {
                 sb_rgbw_conversion_use_fixed_value(&conv, color.red);
-            } else if (_params.led_specs[0].white_temperature > 0) {
-                sb_rgbw_conversion_use_color_temperature(&conv, _params.led_specs[0].white_temperature);
+            } else if (_params.led_specs[i].white_temperature > 0) {
+                sb_rgbw_conversion_use_color_temperature(&conv, _params.led_specs[i].white_temperature);
             } else {
                 sb_rgbw_conversion_use_min_subtraction(&conv);
             }
 
             rgbw_color = sb_rgb_color_to_rgbw(color, conv);
-            _rgb_led->set_rgbw(rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white);
+            flush_needed[i] = rgb_led->set_rgbw(
+                rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white, false
+            );
         } else {
             // Code path for standard RGB LEDs
-            _rgb_led->set_rgb(color.red, color.green, color.blue);
+            flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
+        }
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i] && flush_needed[i]) {
+            _rgb_leds[i]->flush();
         }
     }
 
@@ -593,53 +612,67 @@ void AC_DroneShowManager::_update_lights()
 
 void AC_DroneShowManager::_update_rgb_led_instance()
 {
-    static int previous_led_type = -1;
-    static uint8_t previous_channel = 255;
-    static uint8_t previous_num_leds = 0;
+    static bool previous_settings_initialized = false;
+    static int previous_led_type[RGB_LED_OUTPUT_COUNT];
+    static uint8_t previous_channel[RGB_LED_OUTPUT_COUNT];
+    static uint8_t previous_num_leds[RGB_LED_OUTPUT_COUNT];
 
-    // We need to avoid the re-creation of _rgb_led if the type of the LED did
+    if (!previous_settings_initialized) {
+        for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+            previous_led_type[i] = -1;
+            previous_channel[i] = 255;
+            previous_num_leds[i] = 0;
+        }
+        previous_settings_initialized = true;
+    }
+
+    // We need to avoid the re-creation of RGB LEDs if the type of the LED did
     // not change because it causes problems with I2C LEDs on a MatekH743 Slim,
     // leading to watchdog timeouts
 
     if (_rgb_led_factory) {
-        int led_type = _params.led_specs[0].type;
-        uint8_t channel = _params.led_specs[0].channel;
-        uint8_t num_leds = _params.led_specs[0].count;
-        float min_brightness = _params.led_specs[0].min_brightness;
+        for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+            int led_type = _params.led_specs[i].type;
+            uint8_t channel = _params.led_specs[i].channel;
+            uint8_t num_leds = _params.led_specs[i].count;
+            float min_brightness = _params.led_specs[i].min_brightness;
 
-        if (
-            led_type != previous_led_type ||
-            channel != previous_channel ||
-            num_leds != previous_num_leds
-        ) {
-            // Turn off the old RGB LED
-            if (_rgb_led)
-            {
-                _rgb_led->set_rgb(0, 0, 0);
+            if (
+                led_type != previous_led_type[i] ||
+                channel != previous_channel[i] ||
+                num_leds != previous_num_leds[i]
+            ) {
+                // Turn off the old RGB LED
+                if (_rgb_leds[i])
+                {
+                    _rgb_leds[i]->set_rgb(0, 0, 0);
 
-                delete _rgb_led;
-                _rgb_led = NULL;
+                    delete _rgb_leds[i];
+                    _rgb_leds[i] = NULL;
+                }
+
+                // Construct the new LED
+                _rgb_leds[i] = _rgb_led_factory->new_rgb_led_by_type(
+                    static_cast<DroneShowLEDType>(led_type), channel, num_leds, min_brightness
+                );
+
+                // Store the settings
+                previous_led_type[i] = led_type;
+                previous_channel[i] = channel;
+                previous_num_leds[i] = num_leds;
             }
-
-            // Construct the new LED
-            _rgb_led = _rgb_led_factory->new_rgb_led_by_type(
-                static_cast<DroneShowLEDType>(led_type), channel, num_leds, min_brightness
-            );
-
-            // Store the settings
-            previous_led_type = led_type;
-            previous_channel = channel;
-            previous_num_leds = num_leds;
         }
     }
 
-    if (_rgb_led) {
-        // Update gamma correction parameter of LED
-        float gamma = _params.led_specs[0].gamma;
-        _rgb_led->set_gamma(gamma);
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i]) {
+            // Update gamma correction parameter of LED
+            float gamma = _params.led_specs[i].gamma;
+            _rgb_leds[i]->set_gamma(gamma);
 
-        // Update minimum brightness
-        _rgb_led->set_min_brightness(_params.led_specs[0].min_brightness);
+            // Update minimum brightness
+            _rgb_leds[i]->set_min_brightness(_params.led_specs[i].min_brightness);
+        }
     }
 }
 
@@ -667,8 +700,20 @@ bool AC_DroneShowManager::_open_rgb_led_socket()
 
 void AC_DroneShowManager::_repeat_last_rgb_led_command()
 {
-    if (_rgb_led) {
-        _rgb_led->repeat_last_command_if_needed();
+    bool flush_needed[RGB_LED_OUTPUT_COUNT];
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        flush_needed[i] = false;
+
+        if (_rgb_leds[i]) {
+            flush_needed[i] = _rgb_leds[i]->repeat_last_command_if_needed(false);
+        }
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i] && flush_needed[i]) {
+            _rgb_leds[i]->flush();
+        }
     }
 }
 

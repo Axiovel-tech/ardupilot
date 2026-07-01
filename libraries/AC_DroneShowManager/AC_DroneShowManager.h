@@ -529,6 +529,9 @@ public:
 
     static const struct AP_Param::GroupInfo var_info[];
 
+    // Number of physical RGB LED outputs driven from the logical show light.
+    static constexpr uint8_t RGB_LED_OUTPUT_COUNT = 2;
+
     // Hard fence subsystem. This should really have to be in Copter or some
     // other top-level class; we put it here because we are trying to restrict
     // ourselves to the SHOW_ parameter group only, and that one is managed by
@@ -628,7 +631,7 @@ private:
 
             // Minimum brightness threshold (as a ratio 0-1) below which LED is turned off
             AP_Float min_brightness;
-        } led_specs[1];
+        } led_specs[RGB_LED_OUTPUT_COUNT];
 
         struct {
             // Specifies the type of the pyrotechnic device
@@ -791,8 +794,8 @@ private:
     // Factory object that can create RGBLed instances that the drone show manager will control
     DroneShowLEDFactory* _rgb_led_factory;
 
-    // RGB led that the drone show manager controls
-    DroneShowLED* _rgb_led;
+    // RGB leds that the drone show manager controls
+    DroneShowLED* _rgb_leds[RGB_LED_OUTPUT_COUNT];
 
     // Last RGB color that was sent to the RGB led
     sb_rgb_color_t _last_rgb_led_color;

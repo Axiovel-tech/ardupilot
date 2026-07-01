@@ -43,7 +43,7 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _trajectory_is_circular(false),
     _controller_update_delta_msec(1000 / DEFAULT_UPDATE_RATE_HZ),
     _pyro_device(0),
-    _rgb_led(0),
+    _rgb_leds(),
     _rc_switches_blocked_until(0),
     _boot_count(0),
     _projected_wall_clock_time_at_takeoff_sec(NAN),
@@ -66,6 +66,11 @@ AC_DroneShowManager::AC_DroneShowManager() :
 
 AC_DroneShowManager::~AC_DroneShowManager()
 {
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        delete _rgb_leds[i];
+        _rgb_leds[i] = nullptr;
+    }
+
     sb_show_controller_destroy(&_show_controller);
     SB_DECREF_STATIC(&_main_show_scene);
     sb_screenplay_destroy(&_screenplay);

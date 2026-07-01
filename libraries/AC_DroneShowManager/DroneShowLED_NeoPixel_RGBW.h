@@ -26,6 +26,8 @@ public:
     DroneShowLED_NeoPixel_RGBW(const DroneShowLED_NeoPixel_RGBW &other) = delete;
     DroneShowLED_NeoPixel_RGBW &operator=(const DroneShowLED_NeoPixel_RGBW&) = delete;
 
+    bool flush() override;
+
 protected:
     bool init(void) override;
     bool set_raw_rgbw(uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
