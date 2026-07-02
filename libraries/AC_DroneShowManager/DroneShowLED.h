@@ -104,8 +104,8 @@ public:
      * Red, green and blue channel values used in this function are _before_
      * gamma correction. The function will apply gamma correction on its own.
      */
-    void set_rgb(uint8_t red, uint8_t green, uint8_t blue) {
-        set_rgbw(red, green, blue, 0);
+    bool set_rgb(uint8_t red, uint8_t green, uint8_t blue, bool send_now = true) {
+        return set_rgbw(red, green, blue, 0, send_now);
     }
 
     /**
@@ -115,7 +115,7 @@ public:
      * _before_ gamma correction. The function will apply gamma correction on
      * its own.
      */
-    void set_rgbw(uint8_t red, uint8_t green, uint8_t blue, uint8_t white) {
+    bool set_rgbw(uint8_t red, uint8_t green, uint8_t blue, uint8_t white, bool send_now = true) {
         if (red != _last_red || green != _last_green || blue != _last_blue || white != _last_white) {
             _last_red = red;
             _last_green = green;
@@ -124,7 +124,7 @@ public:
             _reset_repeat_count();
         }
 
-        repeat_last_command_if_needed();
+        return repeat_last_command_if_needed(send_now);
     }
 
     /**
@@ -136,13 +136,18 @@ public:
     virtual bool supports_white_channel() { return false; }
 
     /**
+     * Flushes staged LED output to the physical device.
+     */
+    virtual bool flush() { return true; }
+
+    /**
      * Repeats the last command to set the color of the RGB LED if needed.
      */
-    void repeat_last_command_if_needed() {
+    bool repeat_last_command_if_needed(bool send_now = true) {
         uint8_t red, green, blue, white;
 
         if (_repeat_count_left == 0) {
-            return;
+            return false;
         }
 
         // Calculate overall brightness as maximum of all channels
@@ -162,8 +167,14 @@ public:
         }
 
         if (set_raw_rgbw(red, green, blue, white)) {
+            if (send_now) {
+                flush();
+            }
             _repeat_count_left--;
+            return true;
         }
+
+        return false;
     }
 
 protected:

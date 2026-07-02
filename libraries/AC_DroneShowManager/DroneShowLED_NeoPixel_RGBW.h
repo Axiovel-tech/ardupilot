@@ -11,15 +11,22 @@
  * RGB LED implementation that sends the current state of the RGB LED to a
  * NeoPixel RGBW LED strip.
  *
- * The implementation assumes that the wire ordering of the components is RGBW.
+ * The implementation supports RGBW and GRBW wire ordering of the components.
  */
 class DroneShowLED_NeoPixel_RGBW : public DroneShowLED {
 public:
-    DroneShowLED_NeoPixel_RGBW(uint8_t chan = 1, uint8_t num_leds = 16);
+    enum class ByteOrder {
+        RGBW,
+        GRBW,
+    };
+
+    DroneShowLED_NeoPixel_RGBW(uint8_t chan = 1, uint8_t num_leds = 16, ByteOrder order = ByteOrder::RGBW);
 
     /* Do not allow copies */
     DroneShowLED_NeoPixel_RGBW(const DroneShowLED_NeoPixel_RGBW &other) = delete;
     DroneShowLED_NeoPixel_RGBW &operator=(const DroneShowLED_NeoPixel_RGBW&) = delete;
+
+    bool flush() override;
 
 protected:
     bool init(void) override;
@@ -30,4 +37,5 @@ private:
     uint8_t _chan;
     uint8_t _num_leds;
     uint8_t _virtual_num_leds;
+    ByteOrder _order;
 };
