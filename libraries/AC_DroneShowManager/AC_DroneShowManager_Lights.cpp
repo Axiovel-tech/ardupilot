@@ -563,14 +563,25 @@ void AC_DroneShowManager::_update_lights()
             continue;
         }
 
-        // No need to test whether the RGB values or the gamma correction
-        // changed because the LED classes do this on their own
+        // No need to test whether the gamma correction changed because the
+        // LED class rebuilds its lookup table only when the exponent changes
         rgb_led->set_gamma(_params.led_specs[i].gamma);
+
+        // Apply gamma correction to the RGB color _before_ deriving the white
+        // channel, so that the white extraction operates on the same drive
+        // levels that are actually sent to the LEDs. The white channel is
+        // computed from these gamma-corrected values and therefore needs no
+        // separate correction.
+        sb_rgb_color_t corrected = sb_rgb_color_make(
+            rgb_led->apply_gamma(color.red),
+            rgb_led->apply_gamma(color.green),
+            rgb_led->apply_gamma(color.blue)
+        );
 
         if (rgb_led->supports_white_channel()) {
             // Code path for LEDs that support a white channel
             sb_rgbw_color_t rgbw_color = convert_rgb_color_to_rgbw(
-                color,
+                corrected,
                 _params.led_specs[i].white_mode,
                 _params.led_specs[i].white_gain,
                 _params.led_specs[i].white_temperature,
@@ -582,7 +593,7 @@ void AC_DroneShowManager::_update_lights()
             );
         } else {
             // Code path for standard RGB LEDs
-            flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
+            flush_needed[i] = rgb_led->set_rgb(corrected.red, corrected.green, corrected.blue, false);
         }
     }
 

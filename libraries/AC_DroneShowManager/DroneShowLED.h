@@ -75,6 +75,20 @@ public:
     }
 
     /**
+     * Applies gamma correction to a single 0-255 color component using the
+     * current gamma lookup table of the LED.
+     *
+     * This is exposed so that callers can gamma-correct an RGB color _before_
+     * deriving a white channel from it: the white channel of an RGBW LED has
+     * to be computed from the gamma-corrected RGB values, so the correction
+     * cannot be deferred to the raw output stage. LEDs therefore expect the
+     * values passed to set_rgb() / set_rgbw() to be gamma-corrected already.
+     */
+    uint8_t apply_gamma(uint8_t value) const {
+        return _gamma_lookup_table[value];
+    }
+
+    /**
      * Sets the minimum brightness threshold of the LED.
      */
     void set_min_brightness(float value) {
@@ -100,9 +114,10 @@ public:
     /**
      * Sets the color of the LED in RGB space. The value of the white channel
      * is assumed to be zero.
-     * 
-     * Red, green and blue channel values used in this function are _before_
-     * gamma correction. The function will apply gamma correction on its own.
+     *
+     * Red, green and blue channel values used in this function are assumed to
+     * be gamma-corrected already (see apply_gamma()); they are forwarded to
+     * the output device as-is.
      */
     bool set_rgb(uint8_t red, uint8_t green, uint8_t blue, bool send_now = true) {
         return set_rgbw(red, green, blue, 0, send_now);
@@ -110,10 +125,10 @@ public:
 
     /**
      * Sets the color of the LED in RGBW space.
-     * 
+     *
      * Red, green, blue and white channel values used in this function are
-     * _before_ gamma correction. The function will apply gamma correction on
-     * its own.
+     * assumed to be gamma-corrected already (see apply_gamma()); they are
+     * forwarded to the output device as-is.
      */
     bool set_rgbw(uint8_t red, uint8_t green, uint8_t blue, uint8_t white, bool send_now = true) {
         if (red != _last_red || green != _last_green || blue != _last_blue || white != _last_white) {
