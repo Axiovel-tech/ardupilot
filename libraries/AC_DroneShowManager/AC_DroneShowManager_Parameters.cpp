@@ -107,6 +107,21 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("LED0_MINBRI", 32, AC_DroneShowManager, _params.led_specs[0].min_brightness, 0.0f),
 
+    // @Param: LED0_WMODE
+    // @DisplayName: White channel mode of the LED channel
+    // @Description: Specifies how the white channel of an RGBW LED is derived from the RGB color of the show. In subtractive mode the white content of the color is moved from the RGB channels to the white LED, assuming that the white LED matches the combined brightness of the RGB LEDs; this makes full white use the white LED only. In additive mode the RGB channels are left untouched and the white LED is driven with the white content of the color in addition, for maximum light output; full white then lights up all four LEDs. Calibrated subtractive mode behaves like subtractive mode but compensates for the true relative brightness of the white LED as given in SHOW_LED0_WGAIN; white content that the white LED cannot provide on its own is left on the RGB channels.
+    // @Values: 0:Subtractive,1:Additive,2:Calibrated subtractive
+    // @User: Advanced
+    AP_GROUPINFO("LED0_WMODE", 46, AC_DroneShowManager, _params.led_specs[0].white_mode, DroneShowLEDWhiteMode_Subtractive),
+
+    // @Param: LED0_WGAIN
+    // @DisplayName: Relative brightness of the white LED of the channel
+    // @Description: Luminous output of the white LED of the channel at full drive, relative to the red, green and blue LEDs of the same module lit together at full drive. Used only when SHOW_LED0_WMODE is set to calibrated subtractive mode. To measure it, compare the illuminance of the white LED alone at full drive with the illuminance of the red, green and blue LEDs together at full drive using a lux meter; the ratio of the two readings is the value of this parameter.
+    // @Range: 0.05 4
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("LED0_WGAIN", 47, AC_DroneShowManager, _params.led_specs[0].white_gain, 1.0f),
+
     // @Param: LED1_TYPE
     // @DisplayName: Assignment of LED channel 1 to a LED output type
     // @Description: Specifies where the output of the main LED light track of the show should be sent for the second physical LED output
@@ -149,6 +164,21 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 0.01
     // @User: Advanced
     AP_GROUPINFO("LED1_MINBRI", 45, AC_DroneShowManager, _params.led_specs[1].min_brightness, 0.0f),
+
+    // @Param: LED1_WMODE
+    // @DisplayName: White channel mode of the second LED channel
+    // @Description: Specifies how the white channel of an RGBW LED is derived from the RGB color of the show. In subtractive mode the white content of the color is moved from the RGB channels to the white LED, assuming that the white LED matches the combined brightness of the RGB LEDs; this makes full white use the white LED only. In additive mode the RGB channels are left untouched and the white LED is driven with the white content of the color in addition, for maximum light output; full white then lights up all four LEDs. Calibrated subtractive mode behaves like subtractive mode but compensates for the true relative brightness of the white LED as given in SHOW_LED1_WGAIN; white content that the white LED cannot provide on its own is left on the RGB channels.
+    // @Values: 0:Subtractive,1:Additive,2:Calibrated subtractive
+    // @User: Advanced
+    AP_GROUPINFO("LED1_WMODE", 48, AC_DroneShowManager, _params.led_specs[1].white_mode, DroneShowLEDWhiteMode_Subtractive),
+
+    // @Param: LED1_WGAIN
+    // @DisplayName: Relative brightness of the white LED of the second channel
+    // @Description: Luminous output of the white LED of the second channel at full drive, relative to the red, green and blue LEDs of the same module lit together at full drive. Used only when SHOW_LED1_WMODE is set to calibrated subtractive mode. To measure it, compare the illuminance of the white LED alone at full drive with the illuminance of the red, green and blue LEDs together at full drive using a lux meter; the ratio of the two readings is the value of this parameter.
+    // @Range: 0.05 4
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("LED1_WGAIN", 49, AC_DroneShowManager, _params.led_specs[1].white_gain, 1.0f),
 
     // @Param: MODE_BOOT
     // @DisplayName: Conditions for entering show mode

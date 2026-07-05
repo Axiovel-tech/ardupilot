@@ -631,6 +631,15 @@ private:
 
             // Minimum brightness threshold (as a ratio 0-1) below which LED is turned off
             AP_Float min_brightness;
+
+            // How the white channel is derived from the RGB color of the show
+            // (see DroneShowLEDWhiteMode)
+            AP_Int8 white_mode;
+
+            // Luminous output of the white LED at full drive relative to the
+            // red, green and blue LEDs combined at full drive; used by the
+            // calibrated subtractive white mode
+            AP_Float white_gain;
         } led_specs[RGB_LED_OUTPUT_COUNT];
 
         struct {

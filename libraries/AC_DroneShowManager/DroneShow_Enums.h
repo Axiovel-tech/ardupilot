@@ -60,6 +60,23 @@ enum DroneShowPreflightCheckFlag {
     DroneShowPreflightCheck_NotAtTakeoffPosition = (1 << 7),
 };
 
+// Ways to derive the white channel of an RGBW LED from the RGB color of the show
+enum DroneShowLEDWhiteMode {
+    // White content of the color is moved from the RGB channels to the white
+    // LED, assuming that the white LED at a given drive level is exactly as
+    // bright as the red, green and blue LEDs combined at the same drive level
+    DroneShowLEDWhiteMode_Subtractive = 0,
+
+    // RGB channels are left untouched and the white LED is driven with the
+    // white content of the color in addition, for maximum light output
+    DroneShowLEDWhiteMode_Additive = 1,
+
+    // Like the subtractive mode, but compensates for the measured relative
+    // brightness of the white LED; white content that the white LED cannot
+    // provide on its own is left on the RGB channels
+    DroneShowLEDWhiteMode_CalibratedSubtractive = 2,
+};
+
 // Light effect type when the lights are driven from the GCS
 enum LightEffectType {
     LightEffect_Off,
