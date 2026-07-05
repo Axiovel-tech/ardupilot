@@ -631,6 +631,12 @@ private:
 
             // Minimum brightness threshold (as a ratio 0-1) below which LED is turned off
             AP_Float min_brightness;
+
+            // Per-channel output gains applied before gamma correction
+            AP_Float red_gain;
+            AP_Float green_gain;
+            AP_Float blue_gain;
+            AP_Float white_gain;
         } led_specs[RGB_LED_OUTPUT_COUNT];
 
         struct {
