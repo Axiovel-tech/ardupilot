@@ -219,7 +219,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: SYNC_MODE
     // @DisplayName: Time synchronization mode
     // @Description: Time synchronization mode to use when starting the show
-    // @Values: 0:Countdown, 1:GPS time
+    // @Values: 0:Countdown, 1:GPS time, 2:UWB/LTC deadline
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("SYNC_MODE", 18, AC_DroneShowManager, _params.time_sync_mode, DEFAULT_SYNC_MODE),

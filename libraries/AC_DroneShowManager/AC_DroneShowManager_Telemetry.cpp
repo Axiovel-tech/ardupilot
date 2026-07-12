@@ -168,12 +168,21 @@ uint8_t* AC_DroneShowManager::_fill_drone_show_status_packet_buffer(uint8_t* buf
      *
      * Bits 0 and 1: boot count modulo 4
      * Bits 2 and 3: authorization scope
-     * Bits 4-5: reserved, set to zero
+     * Bits 4-5: start synchronization state:
+     *   0 = none or legacy parameter/countdown source
+     *   1 = RC internal-clock fallback
+     *   2 = UWB/LTC deadline locked, before commit
+     *   3 = UWB/LTC deadline committed to the internal clock
      * Bit 6: indicates that at least one ESC is reporting a high error rate.
      * Bit 7: indicates that the drone has deviated from its expected position.
      */
     flags3 = _boot_count & 0x03;
     flags3 |= (static_cast<uint8_t>(get_authorization_scope()) & 0x03) << 2;
+    if (_start_time_requested_by == StartTimeSource::RC_SWITCH) {
+        flags3 |= (1 << 4);
+    } else if (_start_time_requested_by == StartTimeSource::UWB_LTC) {
+        flags3 |= ((_uwb_show_sync.committed ? 3 : 2) << 4);
+    }
     if (
         _params.max_esc_error_rate_pcnt >= 0 &&
         AP::esc_telem().has_high_error_rate(_params.max_esc_error_rate_pcnt)

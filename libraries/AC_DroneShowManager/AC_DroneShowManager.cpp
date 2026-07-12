@@ -40,6 +40,7 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _start_time_requested_by(StartTimeSource::NONE),
     _start_time_on_internal_clock_usec(0),
     _start_time_unix_usec(0),
+    _uwb_show_sync{},
     _trajectory_is_circular(false),
     _controller_update_delta_msec(1000 / DEFAULT_UPDATE_RATE_HZ),
     _pyro_device(0),
@@ -127,6 +128,7 @@ bool AC_DroneShowManager::clear_scheduled_start_time(bool force)
     _start_time_on_internal_clock_usec = 0;
     _start_time_requested_by = StartTimeSource::NONE;
     _start_time_unix_usec = 0;
+    _uwb_show_sync = {};
 
     return true;
 }
@@ -454,6 +456,9 @@ void AC_DroneShowManager::notify_drone_show_mode_exited()
     _update_pyro_device_instance();
     _update_rgb_led_instance();
     _clear_start_time_if_set_by_switch();
+    if (_start_time_requested_by == StartTimeSource::UWB_LTC) {
+        clear_scheduled_start_time(/* force = */ true);
+    }
     _last_setpoint.clear();
 }
 
@@ -467,6 +472,20 @@ void AC_DroneShowManager::handle_rc_start_switch()
     if (_are_rc_switches_blocked())
     {
         return;
+    }
+
+    if (_start_time_requested_by == StartTimeSource::RC_SWITCH) {
+        return;
+    }
+
+    // Once the UWB deadline has been committed, an ordinary start input must
+    // not move it. Before that point the RC switch is an explicit, independent
+    // fallback and owns the schedule for the rest of this run.
+    if (_start_time_requested_by == StartTimeSource::UWB_LTC) {
+        if (_uwb_show_sync.committed) {
+            return;
+        }
+        _reset_uwb_show_sync();
     }
 
     if (schedule_delayed_start_after(10000 /* msec */)) {
@@ -512,6 +531,8 @@ bool AC_DroneShowManager::schedule_delayed_start_after(uint32_t delay_ms)
 
 void AC_DroneShowManager::update()
 {
+    _update_uwb_show_sync();
+
     static bool main_cycle = true;
 
     if (main_cycle) {
