@@ -236,6 +236,19 @@ bool AC_DroneShowManager::_handle_led_control_message(const mavlink_message_t& m
     return true;
 }
 
+bool AC_DroneShowManager::_shutdown_blackout_active()
+{
+    if (_shutdown_blackout_until_msec) {
+        if (AP_HAL::millis() < _shutdown_blackout_until_msec) {
+            return true;
+        }
+        // The promised power-off never arrived; expire the latch and resume
+        // normal light signals
+        _shutdown_blackout_until_msec = 0;
+    }
+    return false;
+}
+
 void AC_DroneShowManager::_update_lights()
 {
     // TODO(ntamas): mode numbers are hardcoded here; we cannot import them
@@ -273,6 +286,15 @@ void AC_DroneShowManager::_update_lights()
     (mode == MODE_DRONE_SHOW && _stage_in_drone_show_mode == DroneShow_RTL) \
 )
 
+    // A shutdown blackout (companion computer about to cut our power rail;
+    // MAV_CMD_USER_2 sub-command 2) trumps everything: the LED strip stays
+    // powered when this MCU goes down, so whatever color survives here is
+    // what the dark drone keeps displaying. Keep repainting black until the
+    // power actually dies (or the latch expires / is cancelled).
+    if (_shutdown_blackout_active()) {
+        color = Colors::BLACK;
+        light_signal_affected_by_brightness_setting = false;
+    } else
     // During compass calibration, the light should be purple no matter what.
     // Compass calibration is always requested by the user so he can rightly
     // expect any light signal that was previously set up from the GCS to be

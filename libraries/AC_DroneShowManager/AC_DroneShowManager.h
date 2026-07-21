@@ -809,6 +809,21 @@ private:
     // Timestamp that defines whether the RC start switch is blocked (and if so, until when)
     uint32_t _rc_switches_blocked_until;
 
+    // Deadline (AP_HAL::millis()) until which the show LED output is forced to
+    // black because a companion computer signalled an imminent power-off of
+    // this flight controller (MAV_CMD_USER_2, sub-command 2). The LED strip is
+    // powered from a rail that stays up when the FC rail is cut, so it would
+    // otherwise keep displaying the last commanded color indefinitely. Zero
+    // when inactive; expires on its own in case the power-off never follows.
+    uint32_t _shutdown_blackout_until_msec;
+
+    // How long a shutdown blackout request stays latched without being
+    // refreshed. Long enough for the companion computer to cut our power
+    // after receiving the COMMAND_ACK, short enough that an aborted
+    // power-off does not leave the drone dark for long even if the explicit
+    // cancel command is lost.
+    static constexpr uint32_t SHUTDOWN_BLACKOUT_TIMEOUT_MSEC = 10000;
+
     // Copy of the STAT_BOOTCNT parameter value at boot; we will send the lower
     // two bits of this value regularly in status packets to allow the GCS to
     // detect when the drone was rebooted
@@ -819,6 +834,10 @@ private:
 
     // Returns whether the RC switches are currently blocked
     bool _are_rc_switches_blocked();
+
+    // Returns whether the shutdown blackout is currently forcing the LEDs
+    // dark, clearing the latch when it has expired
+    bool _shutdown_blackout_active();
     
     // Checks whether there were any changes in the parameters relevant to the
     // execution of the drone show. This has to be called regularly from update()
