@@ -44,6 +44,7 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _controller_update_delta_msec(1000 / DEFAULT_UPDATE_RATE_HZ),
     _pyro_device(0),
     _rgb_leds(),
+    _last_rgb_led_push_at_msec(0),
     _rc_switches_blocked_until(0),
     _shutdown_blackout_until_msec(0),
     _boot_count(0),
@@ -515,6 +516,13 @@ void AC_DroneShowManager::update()
 {
     static bool main_cycle = true;
 
+    // AXIOVEL fork (rtls-link-zephyr#120): evaluate the show lights on every
+    // tick (50 Hz) instead of on alternating ticks (25 Hz) so that light
+    // transitions -- most importantly the start-anchored pre-start blink --
+    // are quantized to +/-20 ms instead of +/-40 ms across the fleet.
+    // _update_lights() itself throttles pushes to the physical LEDs so the
+    // effective output frame rate is unchanged; only the evaluation phase
+    // improves. Everything else keeps its original 25 Hz alternating cadence.
     if (main_cycle) {
         _check_changes_in_parameters();
         _check_events();
@@ -524,6 +532,7 @@ void AC_DroneShowManager::update()
         _update_lights();
         _update_pyro_device();
     } else {
+        _update_lights();
         _repeat_last_rgb_led_command();
     }
 

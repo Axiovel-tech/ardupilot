@@ -11,6 +11,15 @@
 // Group mask indicating all groups
 #define ALL_GROUPS 0
 
+// AXIOVEL fork (rtls-link-zephyr#120): minimum interval between two frames
+// pushed to the physical LEDs by _update_lights(). _update_lights() is now
+// evaluated on every 50 Hz tick (20 ms) instead of every other one; this
+// throttle keeps the output frame rate at the previous 25 Hz maximum while
+// the evaluation phase improves. 35 ms (rather than 40) is used so that
+// scheduler jitter cannot turn the intended every-other-tick cadence into an
+// every-third-tick one.
+#define LED_PUSH_MIN_INTERVAL_MSEC 35
+
 // Undefine some macros from RGBLed.h that are in comflict with the code below
 #undef BLACK
 #undef RED
@@ -568,7 +577,23 @@ void AC_DroneShowManager::_update_lights()
 
     _last_rgb_led_color = color;
 
+    // AXIOVEL fork (rtls-link-zephyr#120): this function now runs on every
+    // 50 Hz tick (previously every other tick) so that light transitions --
+    // most importantly the start-anchored pre-start blink -- are quantized to
+    // +/-20 ms instead of +/-40 ms. To keep the effective output frame rate
+    // to the physical LEDs identical to the previous 25 Hz behavior, actual
+    // pushes are throttled to at most one per LED_PUSH_MIN_INTERVAL_MSEC.
+    // When the strip has been idle (a stable color pushes no frames because
+    // DroneShowLED::set_rgbw() is a no-op while the color is unchanged and
+    // the repeat count is exhausted), the next color change goes out
+    // immediately -- which is exactly where the improved quantization
+    // matters. When colors change on every tick (show playback), pushes
+    // settle on the same every-other-tick 25 Hz cadence as before.
+    const uint32_t now_push_msec = AP_HAL::millis();
+    if (now_push_msec - _last_rgb_led_push_at_msec >= LED_PUSH_MIN_INTERVAL_MSEC) {
+
     bool flush_needed[RGB_LED_OUTPUT_COUNT];
+    bool any_frame_pushed = false;
     for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
         flush_needed[i] = false;
     }
@@ -605,6 +630,8 @@ void AC_DroneShowManager::_update_lights()
             // Code path for standard RGB LEDs
             flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
         }
+
+        any_frame_pushed |= flush_needed[i];
     }
 
     for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
@@ -612,6 +639,14 @@ void AC_DroneShowManager::_update_lights()
             _rgb_leds[i]->flush();
         }
     }
+
+    if (any_frame_pushed) {
+        // Only remember pushes that actually put a frame on the wire so an
+        // idle strip does not delay the next transition
+        _last_rgb_led_push_at_msec = now_push_msec;
+    }
+
+    } // end of push throttle (AXIOVEL fork)
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     if (_sock_rgb_open) {

@@ -533,6 +533,18 @@ void Copter::rc_loop()
     // -----------------------------------------
     read_radio();
     rc().read_mode_switch();
+
+#if MODE_DRONE_SHOW_ENABLED
+    // AXIOVEL fork (rtls-link-zephyr#120): sample the DRONE_SHOW_START aux
+    // switch here at the rc_loop rate instead of waiting for the 10 Hz
+    // read_aux_all() scheduler task. The 10 Hz sweep gave every drone an
+    // uncorrelated 0-100 ms detection phase, which dominated the visible
+    // inter-drone spread of RC-triggered show starts (start = own detection
+    // + fixed delay). read_aux() only acts on a debounced position change,
+    // so the extra sampling is a no-op while the switch is stable; the
+    // 5-second boot lockout in the Copter aux handler is unaffected.
+    rc().read_aux_show_start();
+#endif
 }
 
 // throttle_loop - should be run at 50 hz
