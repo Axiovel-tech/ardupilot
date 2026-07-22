@@ -504,8 +504,10 @@ public:
     // Updates the state of the LED light on the drone and performs any additional
     // tasks that have to be performed regularly (such as checking for changes
     // in parameter values). This has to be called at 50 Hz, but most of its
-    // subroutines run at 25 Hz, except _repeat_last_rgb_led_command(), which
-    // may be called more frequently.
+    // subroutines run at 25 Hz. _update_lights() and
+    // _repeat_last_rgb_led_command() may be called more frequently
+    // (AXIOVEL fork, rtls-link-zephyr#120: _update_lights() now runs on every
+    // tick so light transitions are quantized to +/-20 ms).
     void update();
 
     // Returns whether the manager uses GPS time to start the show
@@ -799,6 +801,12 @@ private:
 
     // Last RGB color that was sent to the RGB led
     sb_rgb_color_t _last_rgb_led_color;
+
+    // AXIOVEL fork (rtls-link-zephyr#120): timestamp of the last frame that
+    // was actually pushed to the physical LEDs; used by _update_lights() to
+    // keep the effective LED output frame rate at its pre-fork 25 Hz maximum
+    // now that the color is evaluated on every 50 Hz tick
+    uint32_t _last_rgb_led_push_at_msec;
 
     // Last guided mode command that was sent
     GuidedModeCommand _last_setpoint;

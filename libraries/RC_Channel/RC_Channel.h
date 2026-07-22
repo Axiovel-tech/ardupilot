@@ -517,6 +517,13 @@ public:
     void init_aux_all();
     void read_aux_all();
 
+    // AXIOVEL fork (rtls-link-zephyr#120): fast-path evaluation of the
+    // DRONE_SHOW_START aux switch only. read_aux_all() runs at just 10 Hz,
+    // which gives each drone an uncorrelated 0-100 ms detection phase on the
+    // show start switch; calling this at the rc_loop rate collapses the
+    // cross-fleet show-start detection skew to single-digit milliseconds.
+    void read_aux_show_start();
+
     // mode switch handling
     void reset_mode_switch();
     virtual void read_mode_switch();
