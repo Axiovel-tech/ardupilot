@@ -12,13 +12,15 @@
 #define ALL_GROUPS 0
 
 // AXIOVEL fork (rtls-link-zephyr#120): minimum interval between two frames
-// pushed to the physical LEDs by _update_lights(). _update_lights() is now
-// evaluated on every 50 Hz tick (20 ms) instead of every other one; this
-// throttle keeps the output frame rate at the previous 25 Hz maximum while
-// the evaluation phase improves. 35 ms (rather than 40) is used so that
-// scheduler jitter cannot turn the intended every-other-tick cadence into an
-// every-third-tick one.
-#define LED_PUSH_MIN_INTERVAL_MSEC 35
+// pushed to the physical LEDs by _update_lights(). _update_lights() is
+// evaluated on every 50 Hz tick (20 ms); this throttle is only a safety
+// floor against a future faster evaluation rate flooding a slow backend —
+// at 15 ms it never binds at the current 50 Hz, so every changed evaluation
+// goes straight to the strip (the NeoPixel path is DMA-driven: a 24-LED
+// GRBW frame costs ~1 ms of wire time and near-zero CPU, comfortably
+// supporting 60+ fps for music-dynamic shows; raising the update() task
+// rate is the knob for that).
+#define LED_PUSH_MIN_INTERVAL_MSEC 15
 
 // Undefine some macros from RGBLed.h that are in comflict with the code below
 #undef BLACK
