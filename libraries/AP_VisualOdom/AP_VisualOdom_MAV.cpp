@@ -39,12 +39,16 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
     // rotate position to align with vehicle
     rotate_and_correct_position(pos);
 
-    // the sensor supplies a single scalar error, so apply it to both axes but
-    // floor each one separately.  With _ALT_M_NSE at its zero default both
-    // floors are _POS_M_NSE and behaviour is unchanged.
+    // The sensor supplies a single blended scalar error.  Floor each axis
+    // separately AND scale the vertical by the configured vertical:horizontal
+    // ratio, otherwise the split would silently collapse whenever the sensor
+    // reports an error above both floors - exactly when accuracy is degrading
+    // and the separation matters most.  With _ALT_M_NSE at its zero default the
+    // ratio is 1 and behaviour is unchanged.
     const float sensor_pos_err = posErr;
     posErr = constrain_float(sensor_pos_err, _frontend.get_pos_noise(), 100.0f);
-    const float posErrZ = constrain_float(sensor_pos_err, _frontend.get_alt_noise(), 100.0f);
+    const float posErrZ = constrain_float(sensor_pos_err * _frontend.get_alt_noise_ratio(),
+                                          _frontend.get_alt_noise(), 100.0f);
     angErr = constrain_float(angErr, _frontend.get_yaw_noise(), 1.5f);
 
     // record quality
@@ -64,7 +68,7 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
 
 #if HAL_LOGGING_ENABLED
     // log sensor data
-    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), degrees(yaw), posErr, angErr, reset_counter, !consume, _quality);
+    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), degrees(yaw), posErr, posErrZ, angErr, reset_counter, !consume, _quality);
 #endif
 
     // record time for health monitoring
