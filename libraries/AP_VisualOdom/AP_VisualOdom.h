@@ -77,8 +77,15 @@ public:
     // return velocity measurement noise in m/s
     float get_vel_noise() const { return _vel_noise; }
     
-    // return position measurement noise in m
+    // return horizontal position measurement noise in m
     float get_pos_noise() const { return _pos_noise; }
+
+    // return vertical position measurement noise in m.  Falls back to the
+    // horizontal noise when _ALT_M_NSE is left at zero, preserving the
+    // historical behaviour of a single scalar serving both axes.
+    float get_alt_noise() const {
+        return is_positive(_alt_noise) ? _alt_noise.get() : _pos_noise.get();
+    }
 
     // return yaw measurement noise in rad
     float get_yaw_noise() const { return _yaw_noise; }
@@ -133,7 +140,8 @@ private:
     AP_Float _pos_scale;        // position scale factor applied to sensor values
     AP_Int16 _delay_ms;         // average delay relative to inertial measurements
     AP_Float _vel_noise;        // velocity measurement noise in m/s
-    AP_Float _pos_noise;        // position measurement noise in meters
+    AP_Float _pos_noise;        // horizontal position measurement noise in meters
+    AP_Float _alt_noise;        // vertical position measurement noise in meters (0 = use _pos_noise)
     AP_Float _yaw_noise;        // yaw measurement noise in radians
     AP_Int8 _quality_min;       // positions and velocities will only be sent to EKF if over this value.  if 0 all values sent to EKF
 
