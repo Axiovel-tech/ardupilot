@@ -1605,13 +1605,13 @@ void NavEKF3::writeEulerYawAngle(float yawAngle, float yawAngleErr, uint32_t tim
  * resetTime_ms : system time of the last position reset request (mSec)
  *
 */
-void NavEKF3::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
+void NavEKF3::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float posErrZ, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
-    dal.writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
+    dal.writeExtNavData(pos, quat, posErr, posErrZ, angErr, timeStamp_ms, delay_ms, resetTime_ms);
 
     if (core) {
         for (uint8_t i=0; i<num_cores; i++) {
-            core[i].writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
+            core[i].writeExtNavData(pos, quat, posErr, posErrZ, angErr, timeStamp_ms, delay_ms, resetTime_ms);
         }
     }
 }

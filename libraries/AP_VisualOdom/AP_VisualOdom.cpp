@@ -91,12 +91,20 @@ const AP_Param::GroupInfo AP_VisualOdom::var_info[] = {
     AP_GROUPINFO("_VEL_M_NSE", 5, AP_VisualOdom, _vel_noise, 0.1),
 
     // @Param: _POS_M_NSE
-    // @DisplayName: Visual odometry position measurement noise 
-    // @Description: Visual odometry position measurement noise minimum (meters). This value will be used if the sensor provides a lower noise value (or no noise value)
+    // @DisplayName: Visual odometry horizontal position measurement noise
+    // @Description: Visual odometry horizontal position measurement noise minimum (meters). This value will be used if the sensor provides a lower noise value (or no noise value). If _ALT_M_NSE is zero this value is also used for the vertical axis.
     // @Units: m
     // @Range: 0.1 10.0
     // @User: Advanced
     AP_GROUPINFO("_POS_M_NSE", 6, AP_VisualOdom, _pos_noise, 0.2f),
+
+    // @Param: _ALT_M_NSE
+    // @DisplayName: Visual odometry vertical position measurement noise
+    // @Description: Visual odometry vertical position measurement noise minimum (meters). Set this when the sensor's vertical accuracy differs from its horizontal accuracy, as is typical for UWB systems whose anchors are spread horizontally. Zero means use _POS_M_NSE for the vertical axis as well.
+    // @Units: m
+    // @Range: 0.0 10.0
+    // @User: Advanced
+    AP_GROUPINFO("_ALT_M_NSE", 9, AP_VisualOdom, _alt_noise, 0.0f),
 
     // @Param: _YAW_M_NSE
     // @DisplayName: Visual odometry yaw measurement noise

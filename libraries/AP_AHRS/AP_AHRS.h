@@ -302,8 +302,9 @@ public:
     // Writes the default equivalent airspeed and its 1-sigma uncertainty in m/s to be used in forward flight if a measured airspeed is required and not available.
     void writeDefaultAirSpeed(float airspeed, float uncertainty);
 
-    // Write position and quaternion data from an external navigation system
-    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
+    // Write position and quaternion data from an external navigation system.
+    // posErr is the horizontal position error 1-std (m), posErrZ the vertical.
+    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float posErrZ, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
 
     // Write velocity data from an external navigation system
     void writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms);

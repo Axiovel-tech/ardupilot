@@ -30,7 +30,12 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
     const float scale_factor =  _frontend.get_pos_scale();
     Vector3f pos{x * scale_factor, y * scale_factor, z * scale_factor};
 
-    posErr = constrain_float(posErr, _frontend.get_pos_noise(), 100.0f);
+    // the sensor supplies a single scalar error, so apply it to both axes but
+    // floor each one separately.  With _ALT_M_NSE at its zero default both
+    // floors are _POS_M_NSE and behaviour is unchanged.
+    const float sensor_pos_err = posErr;
+    posErr = constrain_float(sensor_pos_err, _frontend.get_pos_noise(), 100.0f);
+    const float posErrZ = constrain_float(sensor_pos_err, _frontend.get_alt_noise(), 100.0f);
     angErr = constrain_float(angErr, _frontend.get_yaw_noise(), 1.5f);
 
     // record quality
@@ -39,7 +44,7 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
     // send attitude and position to EKF if quality OK
     bool consume = (_quality >= _frontend.get_quality_min());
     if (consume) {
-        AP::ahrs().writeExtNavData(pos, attitude, posErr, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
+        AP::ahrs().writeExtNavData(pos, attitude, posErr, posErrZ, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
     }
 
     // calculate euler orientation for logging
