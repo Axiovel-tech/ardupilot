@@ -193,6 +193,8 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
     const uint8_t POSITION_WARNING = 1;
     const uint8_t VELOCITY_WARNING = 2;
     const uint8_t YAW_WARNING = 4;
+    const uint8_t ACCELERATION_WARNING = 8;
+    const uint8_t ACCELERATION_CLIPPED_WARNING = 16;
     static uint8_t warnings_sent = 0;
     // static uint8_t counter = 0;
 
@@ -273,6 +275,71 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
                     warnings_sent |= VELOCITY_WARNING;
                 }
                 command.vel.zero();
+            }
+        }
+
+        if (is_acceleration_control_enabled())
+        {
+            if (!get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(elapsed, command.acc))
+            {
+                command.acc.zero();
+            }
+
+            command.acc *= get_acceleration_feedforward_gain();
+
+            // Validate before bounding. Constraining a non-finite value would
+            // turn it into a finite one -- an infinite Z would clamp to the
+            // full envelope instead of being rejected.
+            if (command.acc.is_nan() || command.acc.is_inf())
+            {
+                if (!(warnings_sent & ACCELERATION_WARNING))
+                {
+                    gcs().send_text(MAV_SEVERITY_WARNING, "Invalid acceleration command; using zero");
+                    warnings_sent |= ACCELERATION_WARNING;
+                }
+                command.acc.zero();
+            }
+
+            // Guided mode configures both the shaping limit and the correction
+            // limit from WPNAV_ACCEL, so feed-forward and the corrective term
+            // share a single acceleration envelope. Bounding feed-forward to
+            // the whole envelope would let the trajectory consume all of it and
+            // leave the position controller nothing to correct with. Reserve a
+            // fraction for correction instead.
+            if (_wp_nav) {
+                const float envelope_fraction = constrain_float(
+                    get_acceleration_feedforward_max_fraction(), 0.0f, 1.0f
+                );
+                const float max_accel_xy = _wp_nav->get_wp_acceleration() * envelope_fraction;
+                const float max_accel_z = _wp_nav->get_accel_z() * envelope_fraction;
+
+                Vector2f accel_xy = command.acc.xy();
+                const bool clipped_xy = accel_xy.limit_length(max_accel_xy);
+                command.acc.x = accel_xy.x;
+                command.acc.y = accel_xy.y;
+
+                const float unclipped_z = command.acc.z;
+                command.acc.z = constrain_float(command.acc.z, -max_accel_z, max_accel_z);
+
+                // Silent truncation would look identical to a well-tracked show
+                // in the logs, so make the first occurrence visible. The show
+                // trajectory is meant to be audited against this envelope
+                // before flight; clipping here means that audit was wrong.
+                if ((clipped_xy || !is_equal(unclipped_z, command.acc.z)) &&
+                    !(warnings_sent & ACCELERATION_CLIPPED_WARNING))
+                {
+                    gcs().send_text(
+                        MAV_SEVERITY_WARNING,
+                        "Show accel FF clipped to %.0f%% of WPNAV envelope",
+                        static_cast<double>(envelope_fraction * 100)
+                    );
+                    warnings_sent |= ACCELERATION_CLIPPED_WARNING;
+                }
+            } else {
+                // Without the WPNAV envelope there is nothing to bound the
+                // feed-forward against, so send none rather than send it
+                // unbounded.
+                command.acc.zero();
             }
         }
 
@@ -378,6 +445,78 @@ bool AC_DroneShowManager::get_desired_velocity_neu_in_cms_per_seconds_at_seconds
     vel.y = vel_east / 10.0f;
     vel.z = vec.z / 10.0f;
     
+    return true;
+}
+
+bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(float time, Vector3f& acc)
+{
+    // Keep the show controller and its output-time metadata synchronized with
+    // the requested wall-clock instant.
+    if (!_get_raw_show_control_output_at_seconds(time)) {
+        return false;
+    }
+
+    sb_trajectory_player_t* player = _show_controller.trajectory_player;
+    sb_screenplay_scene_t* scene = sb_show_controller_get_current_scene(&_show_controller);
+    if (!player || !scene) {
+        return false;
+    }
+
+    const sb_control_output_time_t output_time =
+        sb_show_controller_get_current_output_time(&_show_controller);
+    sb_time_axis_t* time_axis = sb_screenplay_scene_get_time_axis(scene);
+    sb_vector3_with_yaw_t accel_vec;
+    sb_vector3_with_yaw_t velocity_vec;
+    float warped_rate = 1.0f;
+
+    if (
+        !time_axis ||
+        sb_trajectory_player_get_acceleration_at(
+            player, output_time.warped_time_in_scene_sec, &accel_vec
+        ) != SB_SUCCESS ||
+        sb_trajectory_player_get_velocity_at(
+            player, output_time.warped_time_in_scene_sec, &velocity_vec
+        ) != SB_SUCCESS
+    ) {
+        return false;
+    }
+
+    const int32_t time_msec = static_cast<int32_t>(output_time.time_msec);
+    sb_time_axis_map_ex(time_axis, time_msec, &warped_rate);
+
+    // The time-axis API exposes tau_dot but not tau_ddot. Estimate the latter
+    // symmetrically over 20 ms. Time-axis ramps are piecewise linear, so this
+    // is exact away from their endpoints and bounded to one controller sample
+    // of averaging at a segment boundary.
+    constexpr int32_t RATE_DERIVATIVE_HALF_WINDOW_MSEC = 10;
+    const int32_t before_msec = MAX(
+        0, time_msec - RATE_DERIVATIVE_HALF_WINDOW_MSEC
+    );
+    const int32_t after_msec = MIN(
+        INT32_MAX, time_msec + RATE_DERIVATIVE_HALF_WINDOW_MSEC
+    );
+    float rate_before;
+    float rate_after;
+    sb_time_axis_map_ex(time_axis, before_msec, &rate_before);
+    sb_time_axis_map_ex(time_axis, after_msec, &rate_after);
+    const float rate_derivative = (rate_after - rate_before) /
+        ((after_msec - before_msec) / 1000.0f);
+
+    // Chain rule for p(tau(t)):
+    //   d2p/dt2 = p''(tau) * tau_dot^2 + p'(tau) * tau_ddot
+    const float rate_squared = sq(warped_rate);
+    accel_vec.x = accel_vec.x * rate_squared + velocity_vec.x * rate_derivative;
+    accel_vec.y = accel_vec.y * rate_squared + velocity_vec.y * rate_derivative;
+    accel_vec.z = accel_vec.z * rate_squared + velocity_vec.z * rate_derivative;
+
+    const float orientation_rad = _show_coordinate_system.orientation_rad;
+    const float acc_north = cosf(orientation_rad) * accel_vec.x + sinf(orientation_rad) * accel_vec.y;
+    const float acc_east = sinf(orientation_rad) * accel_vec.x - cosf(orientation_rad) * accel_vec.y;
+
+    // Show trajectory units are mm/s/s; Guided expects cm/s/s.
+    acc.x = acc_north / 10.0f;
+    acc.y = acc_east / 10.0f;
+    acc.z = accel_vec.z / 10.0f;
     return true;
 }
 
