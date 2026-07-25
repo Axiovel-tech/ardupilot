@@ -214,6 +214,10 @@ public:
     // cooordinate system, using centimeters per seconds as units.
     bool get_desired_velocity_neu_in_cms_per_seconds_at_seconds(float time, Vector3f& vel) WARN_IF_UNUSED;
 
+    // Returns desired wall-clock acceleration during the current screenplay
+    // scene, in the global NEU coordinate system and cm/s/s.
+    bool get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(float time, Vector3f& acc) WARN_IF_UNUSED;
+
     // Returns the desired yaw and yaw rate of the drone during the drone show the
     // given number of seconds after the start time. Yaw is returned in centidegrees
     // relative to North; yaw rate is returned in centidegrees/seconds.
@@ -314,6 +318,14 @@ public:
 
     // Returns the velocity feed-forward gain factor to use during velocity control
     float get_velocity_feedforward_gain() const { return _params.velocity_feedforward_gain; }
+
+    // Returns the acceleration feed-forward gain factor to use during acceleration control
+    float get_acceleration_feedforward_gain() const { return _params.acceleration_feedforward_gain; }
+
+    // Returns the largest fraction of the WPNAV acceleration envelope that the show
+    // feed-forward is allowed to consume; the remainder is reserved for the position
+    // controller's corrective term.
+    float get_acceleration_feedforward_max_fraction() const { return _params.acceleration_feedforward_max_fraction; }
 
     // Handles a MAVLink user command forwarded to the drone show manager by the central MAVLink handler
     MAV_RESULT handle_command_int_packet(const mavlink_command_int_t &packet);
@@ -428,6 +440,12 @@ public:
     // lower-level position controller of ArduPilot
     bool is_velocity_control_enabled() const {
         return _params.control_mode_flags & DroneShowControl_VelocityControlEnabled;
+    }
+
+    // Returns whether trajectory acceleration is fed into ArduPilot's
+    // lower-level position controller.
+    bool is_acceleration_control_enabled() const {
+        return _params.control_mode_flags & DroneShowControl_AccelerationControlEnabled;
     }
 
     // Returns whether a show file was identified and loaded at boot time
@@ -632,6 +650,13 @@ private:
 
         // Velocity feed-forward gain when velocity control is being used.
         AP_Float velocity_feedforward_gain;
+
+        // Acceleration feed-forward gain when acceleration control is being used.
+        AP_Float acceleration_feedforward_gain;
+
+        // Largest fraction of the WPNAV acceleration envelope that the show
+        // feed-forward may consume.
+        AP_Float acceleration_feedforward_max_fraction;
 
         // Takeoff altitude
         AP_Float takeoff_altitude_m;

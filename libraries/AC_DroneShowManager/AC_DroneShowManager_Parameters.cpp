@@ -177,7 +177,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: CTRL_MODE
     // @DisplayName: Flags to configure the show position control algorithm
     // @Description: Controls various aspects of the position control algorithm built into the firmware
-    // @Bitmask: 0:Enable velocity control,1:Unused (was acceleration control)
+    // @Bitmask: 0:Enable velocity control,1:Enable acceleration feed-forward
     // @User: Advanced
     AP_GROUPINFO("CTRL_MODE", 11, AC_DroneShowManager, _params.control_mode_flags, DroneShowControl_VelocityControlEnabled),
 
@@ -205,6 +205,22 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 0.1
     // @User: Advanced
     AP_GROUPINFO("VEL_FF_GAIN", 16, AC_DroneShowManager, _params.velocity_feedforward_gain, 1.0f),
+
+    // @Param: ACC_FF_GAIN
+    // @DisplayName: Acceleration feed-forward gain
+    // @Description: Gain applied to trajectory acceleration when acceleration feed-forward is enabled in SHOW_CTRL_MODE. The command is constrained to the WPNAV acceleration limits after applying this gain.
+    // @Range: 0 2
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ACC_FF_GAIN", 46, AC_DroneShowManager, _params.acceleration_feedforward_gain, 1.0f),
+
+    // @Param: ACC_FF_MAX
+    // @DisplayName: Acceleration feed-forward envelope fraction
+    // @Description: Largest fraction of the WPNAV acceleration limits that the show acceleration feed-forward may consume. Guided mode configures the shaping limit and the correction limit from the same WPNAV_ACCEL, so the remainder is the headroom left for the position controller to correct tracking error. Values close to 1 let a demanding trajectory saturate the controller.
+    // @Range: 0 1
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ACC_FF_MAX", 47, AC_DroneShowManager, _params.acceleration_feedforward_max_fraction, 0.7f),
 
     // @Param: TAKEOFF_ALT
     // @DisplayName: Takeoff altitude
