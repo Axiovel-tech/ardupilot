@@ -2526,8 +2526,9 @@ void  AP_AHRS::writeBodyFrameOdom(float quality, const Vector3f &delPos, const V
 void AP_AHRS::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float posErrZ, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
 #if HAL_NAVEKF2_AVAILABLE
-    // EKF2 has no separate vertical observation noise, so it keeps using the
-    // horizontal value exactly as before.
+    // EKF2 has no separate vertical observation noise and ignores posErrZ for
+    // fusion; it takes the argument only to forward it to the DAL so that its
+    // replay record is identical to EKF3's.
     EKF2.writeExtNavData(pos, quat, posErr, posErrZ, angErr, timeStamp_ms, delay_ms, resetTime_ms);
 #endif
 #if HAL_NAVEKF3_AVAILABLE
