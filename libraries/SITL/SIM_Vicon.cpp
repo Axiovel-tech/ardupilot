@@ -159,6 +159,16 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
         vel_corrected = vicon_yaw_rot.tofloat() * vel_corrected;
     }
 
+    // add per-axis gaussian measurement noise in the vicon's own frame.  Kept
+    // separate per axis so that systems whose vertical accuracy differs from
+    // horizontal (UWB, for example) can be modelled realistically.
+    const Vector3f &pos_stddev = _sitl->vicon_pos_stddev.get();
+    if (!pos_stddev.is_zero()) {
+        pos_corrected.x += Aircraft::rand_normal(0, pos_stddev.x);
+        pos_corrected.y += Aircraft::rand_normal(0, pos_stddev.y);
+        pos_corrected.z += Aircraft::rand_normal(0, pos_stddev.z);
+    }
+
     // add yaw error reported to vehicle
     yaw = wrap_PI(yaw + radians(_sitl->vicon_yaw_error.get()));
 

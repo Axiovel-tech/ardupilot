@@ -618,6 +618,25 @@ const AP_Param::GroupInfo SIM::var_info3[] = {
     // @User: Advanced
     AP_GROUPINFO("VICON_VGLI",    21, SIM,  vicon_vel_glitch, 0),
 
+    // @Param: VICON_PSTD_X
+    // @DisplayName: SITL vicon position noise North
+    // @Description: SITL vicon position measurement noise 1-sigma North. Zero disables noise.
+    // @Units: m
+    // @User: Advanced
+
+    // @Param: VICON_PSTD_Y
+    // @DisplayName: SITL vicon position noise East
+    // @Description: SITL vicon position measurement noise 1-sigma East. Zero disables noise.
+    // @Units: m
+    // @User: Advanced
+
+    // @Param: VICON_PSTD_Z
+    // @DisplayName: SITL vicon position noise Down
+    // @Description: SITL vicon position measurement noise 1-sigma Down. Zero disables noise. Set independently of X/Y to model systems such as UWB whose vertical accuracy is much worse than horizontal.
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("VICON_PSTD",    24, SIM,  vicon_pos_stddev, 0),
+
     // @Param: RATE_HZ
     // @DisplayName: Loop rate
     // @Description: SITL Loop rate
