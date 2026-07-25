@@ -24,7 +24,7 @@ void AP_VisualOdom_Backend::Write_VisualOdom(float time_delta, const Vector3f &a
 }
 
 // Write visual position sensor data.  x,y,z are in meters, angles are in degrees
-void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float pos_err, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality)
+void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float pos_err, float pos_err_z, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality)
 {
     const struct log_VisualPosition pkt_visualpos {
         LOG_PACKET_HEADER_INIT(LOG_VISUALPOS_MSG),
@@ -38,6 +38,7 @@ void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32
         pitch           : pitch,
         yaw             : yaw,
         pos_err         : pos_err,
+        pos_err_z       : pos_err_z,
         ang_err         : ang_err,
         reset_counter   : reset_counter,
         ignored         : (uint8_t)ignored,

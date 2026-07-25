@@ -43,7 +43,8 @@ struct PACKED log_VisualOdom {
 // @Field: R: Roll lean angle
 // @Field: P: Pitch lean angle
 // @Field: Y: Yaw angle
-// @Field: PErr: Position estimate error
+// @Field: PErr: Horizontal position estimate error
+// @Field: PErrZ: Vertical position estimate error
 // @Field: AErr: Attitude estimate error
 // @Field: Rst: Position reset counter
 // @Field: Ign: Ignored
@@ -59,8 +60,9 @@ struct PACKED log_VisualPosition {
     float roll;     // degrees
     float pitch;    // degrees
     float yaw;      // degrees
-    float pos_err;  // meters
-    float ang_err;  // radians
+    float pos_err;   // horizontal, meters
+    float pos_err_z; // vertical, meters
+    float ang_err;   // radians
     uint8_t reset_counter;
     uint8_t ignored;
     int8_t quality;
@@ -97,7 +99,7 @@ struct PACKED log_VisualVelocity {
     { LOG_VISUALODOM_MSG, sizeof(log_VisualOdom), \
       "VISO", "Qffffffff", "TimeUS,dt,AngDX,AngDY,AngDZ,PosDX,PosDY,PosDZ,conf", "ssrrrmmm-", "FF000000-" }, \
     { LOG_VISUALPOS_MSG, sizeof(log_VisualPosition), \
-      "VISP", "QQIffffffffBBb", "TimeUS,RTimeUS,CTimeMS,PX,PY,PZ,R,P,Y,PErr,AErr,Rst,Ign,Q", "sssmmmddhmd--%", "FFC00000000--0" }, \
+      "VISP", "QQIfffffffffBBb", "TimeUS,RTimeUS,CTimeMS,PX,PY,PZ,R,P,Y,PErr,PErrZ,AErr,Rst,Ign,Q", "sssmmmddhmmd--%", "FFC000000000--0" }, \
     { LOG_VISUALVEL_MSG, sizeof(log_VisualVelocity), \
       "VISV", "QQIffffBBb", "TimeUS,RTimeUS,CTimeMS,VX,VY,VZ,VErr,Rst,Ign,Q", "sssnnnn--%", "FFC0000--0" },
 #else
