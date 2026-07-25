@@ -4,7 +4,6 @@
 #include "AP_NavEKF3_core.h"
 #include <GCS_MAVLink/GCS.h>
 #include <AP_DAL/AP_DAL.h>
-#include <AP_Logger/AP_Logger.h>
 
 /********************************************************
 *                   RESET FUNCTIONS                     *
@@ -977,31 +976,6 @@ void NavEKF3_core::FuseVelPosNED()
                 fuseHgtData = false;
             }
         }
-
-#if HAL_LOGGING_ENABLED
-        // TEMPORARY DIAGNOSTIC (drop before merge): expose the observation variances and
-        // innovation variances actually used by the consistency gates, so that the values
-        // backed out of flight logs from (innovation, test-ratio, P) can be validated.
-        AP::logger().WriteStreaming("XRDB",
-                                    "TimeUS,C,ROBS3,RDC3,ROBS5,RDC5,PDON,P77,P99,IPN,IPE,IPD,SP,SH",
-                                    "s#------------",
-                                    "F-------------",
-                                    "QBffffffffffff",
-                                    AP_HAL::micros64(),
-                                    DAL_CORE(core_index),
-                                    (float)R_OBS[3],
-                                    (float)R_OBS_DATA_CHECKS[3],
-                                    (float)R_OBS[5],
-                                    (float)R_OBS_DATA_CHECKS[5],
-                                    (float)posDownObsNoise,
-                                    (float)P[7][7],
-                                    (float)P[9][9],
-                                    (float)innovVelPos[3],
-                                    (float)innovVelPos[4],
-                                    (float)innovVelPos[5],
-                                    (float)posTestRatio,
-                                    (float)hgtTestRatio);
-#endif
 
         // set range for sequential fusion of velocity and position measurements depending on which data is available and its health
         if (fuseVelData) {
