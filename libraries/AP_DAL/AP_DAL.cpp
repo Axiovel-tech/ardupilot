@@ -356,7 +356,7 @@ void AP_DAL::writeOptFlowMeas(const uint8_t rawFlowQuality, const Vector2f &rawF
 }
 
 // log external navigation data
-void AP_DAL::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
+void AP_DAL::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float posErrZ, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
     end_frame();
 
@@ -364,6 +364,7 @@ void AP_DAL::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float 
     _REPH.pos = pos;
     _REPH.quat = quat;
     _REPH.posErr = posErr;
+    _REPH.posErrZ = posErrZ;
     _REPH.angErr = angErr;
     _REPH.timeStamp_ms = timeStamp_ms;
     _REPH.delay_ms = delay_ms;
@@ -498,8 +499,8 @@ void AP_DAL::handle_message(const log_ROFH &msg, NavEKF2 &ekf2, NavEKF3 &ekf3)
 void AP_DAL::handle_message(const log_REPH &msg, NavEKF2 &ekf2, NavEKF3 &ekf3)
 {
     _REPH = msg;
-    ekf2.writeExtNavData(msg.pos, msg.quat, msg.posErr, msg.angErr, msg.timeStamp_ms, msg.delay_ms, msg.resetTime_ms);
-    ekf3.writeExtNavData(msg.pos, msg.quat, msg.posErr, msg.angErr, msg.timeStamp_ms, msg.delay_ms, msg.resetTime_ms);
+    ekf2.writeExtNavData(msg.pos, msg.quat, msg.posErr, msg.posErrZ, msg.angErr, msg.timeStamp_ms, msg.delay_ms, msg.resetTime_ms);
+    ekf3.writeExtNavData(msg.pos, msg.quat, msg.posErr, msg.posErrZ, msg.angErr, msg.timeStamp_ms, msg.delay_ms, msg.resetTime_ms);
 }
 
 /*
