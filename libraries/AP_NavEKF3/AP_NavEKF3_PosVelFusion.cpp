@@ -1337,7 +1337,7 @@ void NavEKF3_core::selectHeightForFusion()
     if (extNavDataToFuse && (activeHgtSource == AP_NavEKF_Source::SourceZ::EXTNAV)) {
         hgtMea = -extNavDataDelayed.pos.z;
         velPosObs[5] = -hgtMea;
-        posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErrZ, 0.1f, 10.0f));
+        posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErrZ, 0.01f, 10.0f));
         fuseHgtData = true;
     } else
 #endif // EK3_FEATURE_EXTERNAL_NAV
