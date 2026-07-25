@@ -3,11 +3,14 @@
 ## ArduPilot Build Environment
 
 Use the shared Python virtual environment from the primary checkout, even when
-working from a git worktree:
+working from a git worktree. Set `AP_ROOT` to that primary checkout (a worktree
+of it will not have its own `.venv-build`), and `ARM_TOOLCHAIN` to the
+gcc-arm-none-eabi 10-2020-q4-major `bin` directory:
 
 ```bash
-AP_ROOT=/home/singu-dev/dev/fw/repos/axiovel/ardupilot
-export PATH="$AP_ROOT/.venv-build/bin:/home/singu-dev/.local/toolchains/gcc-arm-none-eabi-10-2020-q4-major/bin:$PATH"
+AP_ROOT=/path/to/ardupilot            # primary checkout, not the worktree
+ARM_TOOLCHAIN="$HOME/.local/toolchains/gcc-arm-none-eabi-10-2020-q4-major/bin"
+export PATH="$AP_ROOT/.venv-build/bin:$ARM_TOOLCHAIN:$PATH"
 ```
 
 Invoke waf with that Python explicitly from the active checkout or worktree:
@@ -34,16 +37,17 @@ configuring the target board.
 
 ## AXIOLIGHT-REVB STM32 DFU Flashing
 
-Use STM32CubeProgrammer for STM32 ROM DFU flashing. On this machine the CLI is:
+Use STM32CubeProgrammer for STM32 ROM DFU flashing. Point `STM32_CLI` at your
+installation; the default install puts it here:
 
 ```bash
-STM32_CLI=/home/singu-dev/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI
+STM32_CLI="$HOME/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"
 ```
 
 Build from the active worktree:
 
 ```bash
-AP_ROOT=/home/singu-dev/dev/fw/repos/axiovel/ardupilot
+AP_ROOT=/path/to/ardupilot            # primary checkout, not the worktree
 export PATH="$HOME/.local/toolchains/gcc-arm-none-eabi-10-2020-q4-major/bin:$AP_ROOT/.venv-build/bin:$PATH"
 
 "$AP_ROOT/.venv-build/bin/python" ./waf configure --board AXIOLIGHT-REVB
