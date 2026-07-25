@@ -63,7 +63,11 @@ private:
     struct {
         uint64_t time_send_us;      // system time this message should be sent or 0 if no message to send
         mavlink_message_t obs_msg;  // message to be sent
-    } msg_buf[3];
+    // Deep enough that a full 50Hz sample rate survives the 25-124ms random send
+    // delay with every message type enabled.  With only 3 slots the update()
+    // early-returns whenever the buffer is full, throttling the sensor to well
+    // under 20Hz and silently changing the filter's operating point.
+    } msg_buf[16];
 
     // SIM_VICON_TYPE parameter bit values
     enum class ViconTypeMask : uint8_t {
