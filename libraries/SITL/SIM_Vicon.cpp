@@ -137,6 +137,17 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
     // add earth frame sensor offset and glitch to position
     Vector3d pos_corrected = position + (pos_offset_ef + _sitl->vicon_glitch.get()).todouble();
 
+    // add per-axis gaussian measurement noise.  Applied here, alongside the
+    // glitch and before any VICON_YAW rotation, so the X/Y/Z parameters mean
+    // North/East/Down as documented.  Per axis so that systems whose vertical
+    // accuracy differs from horizontal (UWB, for example) can be modelled.
+    const Vector3f &pos_stddev = _sitl->vicon_pos_stddev.get();
+    if (!pos_stddev.is_zero()) {
+        pos_corrected.x += Aircraft::rand_normal(0, pos_stddev.x);
+        pos_corrected.y += Aircraft::rand_normal(0, pos_stddev.y);
+        pos_corrected.z += Aircraft::rand_normal(0, pos_stddev.z);
+    }
+
     // calculate a velocity offset due to the antenna position offset and body rotation rate
     // note: % operator is overloaded for cross product
     Vector3f gyro(radians(_sitl->state.rollRate),
@@ -157,16 +168,6 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
         vicon_yaw_rot.from_euler(0, 0, -vicon_yaw_rad);
         pos_corrected = vicon_yaw_rot * pos_corrected;
         vel_corrected = vicon_yaw_rot.tofloat() * vel_corrected;
-    }
-
-    // add per-axis gaussian measurement noise in the vicon's own frame.  Kept
-    // separate per axis so that systems whose vertical accuracy differs from
-    // horizontal (UWB, for example) can be modelled realistically.
-    const Vector3f &pos_stddev = _sitl->vicon_pos_stddev.get();
-    if (!pos_stddev.is_zero()) {
-        pos_corrected.x += Aircraft::rand_normal(0, pos_stddev.x);
-        pos_corrected.y += Aircraft::rand_normal(0, pos_stddev.y);
-        pos_corrected.z += Aircraft::rand_normal(0, pos_stddev.z);
     }
 
     // add yaw error reported to vehicle

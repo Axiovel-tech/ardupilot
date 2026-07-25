@@ -26,6 +26,11 @@
 #endif
 #include <AP_Math/AP_Math.h>
 
+// EKF3 historically clamped the external-nav vertical observation noise to this
+// minimum.  Retained as the implicit vertical floor when VISO_ALT_M_NSE is unset,
+// so that leaving the new parameter at zero reproduces the old behaviour exactly.
+#define EXTNAV_LEGACY_ALT_NOISE_FLOOR 0.1f
+
 class AP_VisualOdom_Backend;
 
 #define AP_VISUALODOM_TIMEOUT_MS 300
@@ -80,11 +85,37 @@ public:
     // return horizontal position measurement noise in m
     float get_pos_noise() const { return _pos_noise; }
 
-    // return vertical position measurement noise in m.  Falls back to the
-    // horizontal noise when _ALT_M_NSE is left at zero, preserving the
-    // historical behaviour of a single scalar serving both axes.
+    // return vertical position measurement noise in m.
+    //
+    // When _ALT_M_NSE is left at zero this reproduces the historical behaviour
+    // exactly: a single scalar served both axes, and EKF3 then clamped the
+    // vertical observation noise to a minimum of 0.1m.  Folding that legacy
+    // floor in here keeps the default bit-identical even though EKF3's own
+    // vertical clamp has since been lowered to match the horizontal one.
     float get_alt_noise() const {
-        return is_positive(_alt_noise) ? _alt_noise.get() : _pos_noise.get();
+        if (is_positive(_alt_noise)) {
+            return _alt_noise.get();
+        }
+        return MAX(_pos_noise.get(), EXTNAV_LEGACY_ALT_NOISE_FLOOR);
+    }
+
+    // ratio of vertical to horizontal position noise, used to keep the two axes
+    // separated when the sensor reports its own error rather than relying on
+    // the configured floors.
+    //
+    // Returns exactly 1 when _ALT_M_NSE is unset so that the vertical error
+    // tracks the horizontal one identically to the old single-scalar path; the
+    // legacy 0.1m floor folded into get_alt_noise() must not be allowed to leak
+    // in here as a scale factor.
+    float get_alt_noise_ratio() const {
+        if (!is_positive(_alt_noise)) {
+            return 1.0f;
+        }
+        const float pos_nse = _pos_noise.get();
+        if (!is_positive(pos_nse)) {
+            return 1.0f;
+        }
+        return _alt_noise.get() / pos_nse;
     }
 
     // return yaw measurement noise in rad
