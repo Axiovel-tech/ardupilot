@@ -35,6 +35,50 @@ python -m pip install 'setuptools<81' -e modules/DroneCAN/pydronecan
 For normal ArduPilot bootloader uploads, use `./waf copter --upload` after
 configuring the target board.
 
+## Building (host and docker)
+
+The clone already has its submodules populated; always pass
+`--no-submodule-update` so waf never touches git state.
+
+Host builds:
+
+```bash
+cd ~/dev/fw/axiovel/ardupilot
+./waf configure --board sitl --no-submodule-update && ./waf copter
+./waf configure --board AXIOLIGHT-REVB --no-submodule-update && ./waf copter
+```
+
+The rtls-link-zephyr sim harness (`py/rtlslink/sim/sitl.py`) resolves the SITL
+binary at `build/sitl/bin/arducopter` in this checkout — keep that binary
+present and host-runnable after any build-tree cleanup.
+
+Docker builds MUST bind-mount the repo at the SAME absolute path as the host
+checkout and run as the host UID/GID:
+
+```bash
+cd ~/dev/fw/axiovel/ardupilot
+mkdir -p "$HOME/.ccache-ardupilot-docker"
+docker run --rm -u "$(id -u):$(id -g)" \
+    -v "$PWD:$PWD" -w "$PWD" \
+    -v "$HOME/.ccache-ardupilot-docker:/tmp/ccache" \
+    -e CCACHE_DIR=/tmp/ccache -e HOME=/tmp \
+    ardupilot/ardupilot-dev-chibios:v0.1.3 \
+    bash -c './waf configure --board sitl --no-submodule-update && ./waf copter'
+```
+
+(`-e HOME=/tmp` and the dedicated `CCACHE_DIR` are needed because the host UID
+has no passwd entry in the image; `ardupilot/ardupilot-dev-chibios` carries
+both the native and the `arm-none-eabi` toolchains, so the same command works
+for `--board AXIOLIGHT-REVB`.)
+
+NEVER mix mount paths: waf stores absolute paths in `.lock-waf_linux_build`
+and `build/c4che/*_cache.py`, so a container build with the repo mounted at a
+different path (e.g. upstream's `WORKDIR /ardupilot` convention) poisons every
+subsequent host build of ANY board with errors like `Missing configuration
+file '/ardupilot/build/sitl/ap_config.h'`. If that happens, recover with
+`rm -rf build .lock-waf*` and reconfigure — with the same-path convention
+above, host and container builds share one build tree cleanly.
+
 ## AXIOLIGHT-REVB STM32 DFU Flashing
 
 Use STM32CubeProgrammer for STM32 ROM DFU flashing. Point `STM32_CLI` at your
