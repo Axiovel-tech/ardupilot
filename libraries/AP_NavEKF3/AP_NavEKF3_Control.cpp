@@ -480,7 +480,7 @@ void NavEKF3_core::setAidingMode()
                 // handle height reset as special case
                 if (frontend->sources.getPosZSource(core_index) == AP_NavEKF_Source::SourceZ::EXTNAV) {
                     hgtMea = -extNavDataDelayed.pos.z;
-                    posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErrZ, 0.01f, 10.0f));
+                    posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErr.z, 0.01f, 10.0f));
                     ResetHeight();
                 }
 #endif // EK3_FEATURE_EXTERNAL_NAV

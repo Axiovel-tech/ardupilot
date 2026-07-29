@@ -39,6 +39,23 @@ class AP_VisualOdom
 {
 public:
 
+    // Unique terms of the symmetric 3x3 position covariance supplied by a
+    // pose source.  Values are variances/covariances in m^2 in the same frame
+    // as the reported position.
+    struct PositionCovariance {
+        float xx = NAN;
+        float xy = NAN;
+        float xz = NAN;
+        float yy = NAN;
+        float yz = NAN;
+        float zz = NAN;
+
+        bool has_valid_diagonal() const {
+            return isfinite(xx) && isfinite(yy) && isfinite(zz) &&
+                   xx >= 0.0f && yy >= 0.0f && zz >= 0.0f;
+        }
+    };
+
     AP_VisualOdom();
 
     // get singleton instance
@@ -136,8 +153,8 @@ public:
     // general purpose methods to consume position estimate data and send to EKF
     // distances in meters, roll, pitch and yaw are in radians
     // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality);
-    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality);
+    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance = nullptr);
+    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance = nullptr);
     
     // general purpose methods to consume velocity estimate data and send to EKF
     // velocity in NED meters per second

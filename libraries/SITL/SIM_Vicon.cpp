@@ -149,8 +149,54 @@ const AP_Param::GroupInfo SIM::ViconParms::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("QUAL", 11, ViconParms, quality, 50),
 
+    // @Param: PSTD_X
+    // @DisplayName: SITL vicon position noise North
+    // @Description: SITL vicon position measurement noise 1-sigma North. The per-axis values override P_SD when any is nonzero.
+    // @Units: m
+    // @User: Advanced
+
+    // @Param: PSTD_Y
+    // @DisplayName: SITL vicon position noise East
+    // @Description: SITL vicon position measurement noise 1-sigma East. The per-axis values override P_SD when any is nonzero.
+    // @Units: m
+    // @User: Advanced
+
+    // @Param: PSTD_Z
+    // @DisplayName: SITL vicon position noise Down
+    // @Description: SITL vicon position measurement noise 1-sigma Down. The per-axis values override P_SD when any is nonzero.
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("PSTD", 12, ViconParms, pos_stddev_xyz, 0),
+
     AP_GROUPEND
 };
+
+// Fill the position terms of a MAVLink 6x6 upper-right-triangle pose
+// covariance.  The simulated noise is configured in NED; VICON_YAW rotates
+// the reported position, so rotate the covariance through the same yaw.
+static void set_position_covariance(float covariance[21],
+                                    const Vector3f &position_stddev,
+                                    int16_t vicon_yaw_deg)
+{
+    if (position_stddev.is_zero()) {
+        // MAVLink uses NaN in the first element to mark an unknown covariance.
+        covariance[0] = NAN;
+        return;
+    }
+
+    const float variance_x = sq(position_stddev.x);
+    const float variance_y = sq(position_stddev.y);
+    const float yaw = -radians(vicon_yaw_deg);
+    const float cos_yaw = cosf(yaw);
+    const float sin_yaw = sinf(yaw);
+
+    covariance[0] = sq(cos_yaw) * variance_x + sq(sin_yaw) * variance_y;
+    covariance[1] = cos_yaw * sin_yaw * (variance_x - variance_y);
+    covariance[2] = 0.0f;
+    covariance[6] = sq(sin_yaw) * variance_x + sq(cos_yaw) * variance_y;
+    covariance[7] = 0.0f;
+    covariance[11] = sq(position_stddev.z);
+}
 
 Vicon::Vicon() :
     SerialDevice::SerialDevice()
@@ -265,18 +311,17 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
 
     // add earth frame sensor offset and glitch to position
     Vector3d pos_corrected = position + (pos_offset_ef + _sitl->vicon.glitch.get()).todouble();
-    // add some gaussian noise to the position
-    pos_corrected += Vector3d(
-        Aircraft::rand_normal(0, _sitl->vicon.pos_stddev.get()),
-        Aircraft::rand_normal(0, _sitl->vicon.pos_stddev.get()),
-        Aircraft::rand_normal(0, _sitl->vicon.pos_stddev.get())
-    );
+    Vector3f pos_stddev = _sitl->vicon.pos_stddev_xyz.get();
+    if (pos_stddev.is_zero()) {
+        pos_stddev = Vector3f{_sitl->vicon.pos_stddev.get(),
+                              _sitl->vicon.pos_stddev.get(),
+                              _sitl->vicon.pos_stddev.get()};
+    }
 
-    // add per-axis gaussian measurement noise.  Applied here, alongside the
+    // Add gaussian measurement noise here, alongside the
     // glitch and before any VICON_YAW rotation, so the X/Y/Z parameters mean
     // North/East/Down as documented.  Per axis so that systems whose vertical
     // accuracy differs from horizontal (UWB, for example) can be modelled.
-    const Vector3f &pos_stddev = _sitl->vicon_pos_stddev.get();
     if (!pos_stddev.is_zero()) {
         pos_corrected.x += Aircraft::rand_normal(0, pos_stddev.x);
         pos_corrected.y += Aircraft::rand_normal(0, pos_stddev.y);
@@ -320,14 +365,6 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
     uint64_t time_send_us = now_us + delay_ms * 1000UL;
 
 
-    float pose_cov[21];
-    memset(pose_cov, 0, sizeof(pose_cov));
-    // Set variances (diagonal elements), assume no cross-correlation. TODO: figure out attitude variances
-    const float pos_variance = _sitl->vicon.pos_stddev*_sitl->vicon.pos_stddev;
-    pose_cov[0]  = pos_variance;   // x
-    pose_cov[6]  = pos_variance;   // y
-    pose_cov[11] = pos_variance;   // z
-
     // send vision position estimate message
     uint8_t msg_buf_index;
     if (should_send(ViconTypeMask::VISION_POSITION_ESTIMATE) && get_free_msg_buf_index(msg_buf_index)) {
@@ -340,8 +377,7 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
         pitch: pitch,
         yaw: yaw
         };
-        memcpy(vision_position_estimate.covariance, pose_cov, sizeof(pose_cov));
-
+        set_position_covariance(vision_position_estimate.covariance, pos_stddev, vicon_yaw_deg);
         mavlink_msg_vision_position_estimate_encode_status(
             system_id,
             component_id,
@@ -354,7 +390,7 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
 
     // send older vicon position estimate message
     if (should_send(ViconTypeMask::VICON_POSITION_ESTIMATE) && get_free_msg_buf_index(msg_buf_index)) {
-        const mavlink_vicon_position_estimate_t vicon_position_estimate{
+        mavlink_vicon_position_estimate_t vicon_position_estimate{
         usec: now_us + time_offset_us,
         x: float(pos_corrected.x),
         y: float(pos_corrected.y),
@@ -363,6 +399,7 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
         pitch: pitch,
         yaw: yaw
         };
+        set_position_covariance(vicon_position_estimate.covariance, pos_stddev, vicon_yaw_deg);
         mavlink_msg_vicon_position_estimate_encode_status(
             system_id,
             component_id,
@@ -431,9 +468,8 @@ void Vicon::update_vicon_position_estimate(const Location &loc,
         estimator_type: MAV_ESTIMATOR_TYPE_VIO,
         quality: constrain_int8(_sitl->vicon.quality.get(), -1, 100),
         };
-        memcpy(odometry.pose_covariance, pose_cov, sizeof(pose_cov));
+        set_position_covariance(odometry.pose_covariance, pos_stddev, vicon_yaw_deg);
         memcpy(odometry.velocity_covariance, vel_cov, sizeof(vel_cov));
-
         mavlink_msg_odometry_encode_status(
             system_id,
             component_id,

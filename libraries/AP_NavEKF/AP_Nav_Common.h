@@ -21,6 +21,16 @@
 
 #define MAX_EKF_CORES     3 // maximum allowed EKF Cores to be instantiated
 
+// Position uncertainty supplied with an external-navigation measurement.
+//
+// scalar preserves the legacy blended 1-sigma error used by EKF2 and by
+// sources which do not provide a usable per-axis covariance.  axis contains
+// the N/E/D 1-sigma errors used by EKF3.
+struct ExtNavPositionError {
+    float scalar;
+    Vector3f axis;
+};
+
 // enumeration corresponding to buts within nav_filter_status union.
 // Only used for documentation purposes.
 enum class NavFilterStatusBit {
