@@ -11,6 +11,7 @@
 
 #include "LogStructure.h"
 
+#include <AP_NavEKF/AP_Nav_Common.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <cstddef>
@@ -216,7 +217,7 @@ public:
     void writeOptFlowMeas(const uint8_t rawFlowQuality, const Vector2f &rawFlowRates, const Vector2f &rawGyroRates, const uint32_t msecFlowMeas, const Vector3f &posOffset, float heightOverride);
 
     // log external nav data
-    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float posErrZ, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
+    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, const ExtNavPositionError &posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
     void writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms);
 
     // log wheel odometry data
@@ -404,4 +405,3 @@ namespace AP {
 
 // replay printf for debugging
 void rprintf(const char *format, ...);
-

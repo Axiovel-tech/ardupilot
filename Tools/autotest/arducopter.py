@@ -3544,6 +3544,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "GPS1_TYPE": 0,
             "VISO_TYPE": 1,
+            "VISO_POS_M_NSE": 0.01,
+            "VISO_ALT_M_NSE": 0.01,
             "SERIAL5_PROTOCOL": 1,
         })
         self.reboot_sitl()
@@ -3563,6 +3565,14 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.progress("gpi=%s" % str(gpi))
             if gpi.lat != 0:
                 break
+
+        # The initial samples have unknown covariance and exercise the legacy
+        # scalar fallback.  Switch to anisotropic covariance for the flight.
+        self.set_parameters({
+            "SIM_VICON_PSTD_X": 0.04,
+            "SIM_VICON_PSTD_Y": 0.08,
+            "SIM_VICON_PSTD_Z": 0.12,
+        })
 
         self.takeoff()
         self.set_rc(1, 1600)
@@ -3586,6 +3596,49 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         tstart = self.get_sim_time()
         # self.install_messageprinter_handlers_context(['SIMSTATE', 'GLOBAL_POSITION_INT'])
         self.wait_disarmed(timeout=200)
+
+        # Verify the complete covariance path from the simulated source through
+        # MAVLink and AP_VisualOdom logging, including the exact standard
+        # deviations supplied to EKF3.
+        expected = {
+            "CXX": 0.04**2,
+            "CXY": 0.0,
+            "CXZ": 0.0,
+            "CYY": 0.08**2,
+            "CYZ": 0.0,
+            "CZZ": 0.12**2,
+            "PEN": 0.04,
+            "PEE": 0.08,
+            "PED": 0.12,
+        }
+        mlog = self.dfreader_for_current_onboard_log()
+        fallback_samples = 0
+        covariance_samples = 0
+        while True:
+            msg = mlog.recv_match(type="VISC")
+            if msg is None:
+                break
+            if msg.CVD != 1:
+                if (math.isnan(msg.CXX) and
+                        math.isclose(msg.PEN, 0.01, abs_tol=1e-6) and
+                        math.isclose(msg.PEE, 0.01, abs_tol=1e-6) and
+                        math.isclose(msg.PED, 0.01, abs_tol=1e-6)):
+                    fallback_samples += 1
+                continue
+            covariance_samples += 1
+            for field, value in expected.items():
+                if not math.isclose(getattr(msg, field), value, rel_tol=1e-5, abs_tol=1e-6):
+                    raise NotAchievedException(
+                        "VISC.%s=%f, expected %f" % (field, getattr(msg, field), value)
+                    )
+        if covariance_samples < 10:
+            raise NotAchievedException(
+                "Only %u valid VISC covariance samples logged" % covariance_samples
+            )
+        if fallback_samples < 10:
+            raise NotAchievedException(
+                "Only %u scalar-fallback VISC samples logged" % fallback_samples
+            )
 
     def BodyFrameOdom(self):
         """Disable GPS navigation, enable input of VISION_POSITION_DELTA."""
