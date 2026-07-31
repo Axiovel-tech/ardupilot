@@ -7609,6 +7609,77 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.context_pop()
         self.reboot_sitl()
 
+    def DynamicRpmNotchesRateThread(self):
+        """Use dynamic harmonic notch to control motor noise via ESC telemetry."""
+        self.progress("Flying with ESC telemetry driven dynamic notches")
+        self.context_push()
+        self.set_rc_default()
+        self.set_parameters({
+            "AHRS_EKF_TYPE": 10,
+            "INS_LOG_BAT_MASK": 3,
+            "INS_LOG_BAT_OPT": 0,
+            "INS_GYRO_FILTER": 300, # set gyro filter high so we can observe behaviour
+            "LOG_BITMASK": 959,
+            "LOG_DISARMED": 0,
+            "SIM_VIB_MOT_MAX": 350,
+            "SIM_GYR1_RND": 20,
+            "SIM_ESC_TELEM": 1,
+            "FSTRATE_ENABLE": 1
+        })
+        self.reboot_sitl()
+
+        self.takeoff(10, mode="ALT_HOLD")
+
+        # find a motor peak, the peak is at about 190Hz, so checking between 50 and 320Hz should be safe.
+        # there is a second harmonic at 380Hz which should be avoided to make the test reliable
+        # detect at -5dB so we don't pick some random noise as the peak. The actual peak is about +15dB
+        freq, hover_throttle, peakdb = self.hover_and_check_matched_frequency_with_fft(-5, 50, 320)
+
+        # now add a dynamic notch and check that the peak is squashed
+        self.set_parameters({
+            "INS_LOG_BAT_OPT": 4,
+            "INS_HNTCH_ENABLE": 1,
+            "INS_HNTCH_FREQ": 80,
+            "INS_HNTCH_REF": 1.0,
+            "INS_HNTCH_HMNCS": 5, # first and third harmonic
+            "INS_HNTCH_ATT": 50,
+            "INS_HNTCH_BW": 40,
+            "INS_HNTCH_MODE": 3,
+            "FSTRATE_ENABLE": 1
+        })
+        self.reboot_sitl()
+
+        # -10dB is pretty conservative - actual is about -25dB
+        freq, hover_throttle, peakdb1, psd = \
+            self.hover_and_check_matched_frequency_with_fft_and_psd(-10, 50, 320, reverse=True, instance=2)
+        # find the noise at the motor frequency
+        esc_hz = self.get_average_esc_frequency()
+        esc_peakdb1 = psd["X"][int(esc_hz)]
+
+        # now add notch-per motor and check that the peak is squashed
+        self.set_parameter("INS_HNTCH_OPTS", 2)
+        self.reboot_sitl()
+
+        freq, hover_throttle, peakdb2, psd = \
+            self.hover_and_check_matched_frequency_with_fft_and_psd(-10, 50, 320, reverse=True, instance=2)
+        # find the noise at the motor frequency
+        esc_hz = self.get_average_esc_frequency()
+        esc_peakdb2 = psd["X"][int(esc_hz)]
+
+        # notch-per-motor will be better at the average ESC frequency
+        if esc_peakdb2 > esc_peakdb1:
+            raise NotAchievedException(
+                "Notch-per-motor peak was higher than single-notch peak %fdB > %fdB" %
+                (esc_peakdb2, esc_peakdb1))
+
+        # check that the noise is being squashed at all. this needs to be an aggresive check so that failure happens easily
+        # testing shows this to be -58dB on average
+        if esc_peakdb2 > -25:
+            raise NotAchievedException(
+                "Notch-per-motor had a peak of %fdB there should be none" % esc_peakdb2)
+        self.context_pop()
+        self.reboot_sitl()
+
     def hover_and_check_matched_frequency(self, dblevel=-15, minhz=200, maxhz=300, fftLength=32, peakhz=None):
         '''do a simple up-and-down test flight with current vehicle state.
         Check that the onboard filter comes up with the same peak-frequency that
@@ -10793,6 +10864,150 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         dist_m_max = 8
         if dist_m > dist_m_max:
             raise NotAchievedException("GSF reset failed, vehicle flew too far (%f > %f)" % (dist_m, dist_m_max))
+
+    def set_virtual_compass_parameters(self, initial_yaw, rate_thread=False):
+        params = {
+            "AHRS_EKF_TYPE": 3,
+            "EK2_ENABLE": 0,
+            "EK3_ENABLE": 1,
+            "EK3_SRC1_YAW": 9,
+            "EK3_SRC_VC_YAW": initial_yaw,
+            "COMPASS_USE": 0,
+            "COMPASS_USE2": 0,
+            "COMPASS_USE3": 0,
+        }
+        if rate_thread:
+            params["FSTRATE_ENABLE"] = 1
+        self.set_parameters(params)
+
+    def check_virtual_compass_configuration(self, initial_yaw, rate_thread=False):
+        expected = {
+            "AHRS_EKF_TYPE": 3,
+            "EK2_ENABLE": 0,
+            "EK3_ENABLE": 1,
+            "EK3_SRC1_YAW": 9,
+            "EK3_SRC_VC_YAW": initial_yaw,
+            "COMPASS_USE": 0,
+            "COMPASS_USE2": 0,
+            "COMPASS_USE3": 0,
+        }
+        if rate_thread:
+            expected["FSTRATE_ENABLE"] = 1
+        self.assert_parameter_values(expected)
+
+    def check_virtual_compass_status(self, require_alignment=False):
+        saw_virtual_yaw_alignment = False
+        for statustext in self.context_collection("STATUSTEXT"):
+            text = statustext.text.lower()
+            if "ekf" in text and ("failsafe" in text or "emergency yaw reset" in text):
+                raise NotAchievedException("Unexpected EKF status text: %s" % statustext.text)
+            if "ekf3 imu" in text and "yaw aligned" in text:
+                saw_virtual_yaw_alignment = True
+        if require_alignment and not saw_virtual_yaw_alignment:
+            raise NotAchievedException("Did not see EKF3 virtual compass yaw alignment")
+
+    def fly_virtual_compass(self, rate_thread=False):
+        initial_yaw = 270
+        self.context_push()
+        ex = None
+        try:
+            self.context_collect("STATUSTEXT")
+            self.set_virtual_compass_parameters(initial_yaw, rate_thread=rate_thread)
+            self.reboot_sitl()
+            self.change_mode('GUIDED')
+            self.wait_ready_to_arm()
+            self.check_virtual_compass_configuration(initial_yaw, rate_thread=rate_thread)
+
+            self.start_subtest("virtual compass initial yaw")
+            self.wait_heading(initial_yaw, accuracy=8, timeout=60)
+            self.check_virtual_compass_status(require_alignment=True)
+
+            self.start_subtest("virtual compass follows gyro-propagated yaw while armed")
+            self.arm_vehicle()
+            self.user_takeoff(alt_min=5)
+            self.guided_achieve_heading(330, accuracy=5)
+
+            self.start_subtest("virtual compass freezes heading while disarmed")
+            self.do_RTL()
+            frozen_yaw = self.get_heading()
+            self.set_parameter("SIM_GYR1_BIAS_Z", math.radians(3))
+            self.delay_sim_time(5)
+            self.assert_heading(frozen_yaw, accuracy=5)
+            self.set_parameter("SIM_GYR1_BIAS_Z", 0)
+            self.check_virtual_compass_status(require_alignment=True)
+
+        except Exception as e:
+            self.disarm_vehicle(force=True)
+            self.print_exception_caught(e)
+            ex = e
+        self.context_pop()
+        self.reboot_sitl()
+        if ex is not None:
+            raise ex
+
+    def VirtualCompass(self):
+        '''test EKF3 virtual compass yaw source'''
+        self.fly_virtual_compass()
+
+    def VirtualCompassRateThread(self):
+        '''test EKF3 virtual compass yaw source with the fast rate thread enabled'''
+        self.fly_virtual_compass(rate_thread=True)
+
+    def fly_virtual_compass_mission(self, rate_thread=False):
+        initial_yaw = 270
+        alt = 10
+        self.context_push()
+        ex = None
+        try:
+            self.context_collect("STATUSTEXT")
+            self.set_virtual_compass_parameters(initial_yaw, rate_thread=rate_thread)
+            self.set_parameters({
+                "AUTO_OPTIONS": 3,
+                "WPNAV_SPEED": 500,
+            })
+            self.upload_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, alt),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 30, 0, alt),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 30, 30, alt),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0, 30, alt),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0, 0, alt),
+                (mavutil.mavlink.MAV_CMD_NAV_LAND, 0, 0, 0),
+            ])
+            num_wp = self.get_mission_count()
+
+            self.reboot_sitl()
+            self.change_mode('AUTO')
+            self.wait_ready_to_arm()
+            self.check_virtual_compass_configuration(initial_yaw, rate_thread=rate_thread)
+
+            self.start_subtest("virtual compass mission initial yaw")
+            self.wait_heading(initial_yaw, accuracy=8, timeout=60)
+            self.check_virtual_compass_status(require_alignment=True)
+
+            self.start_subtest("virtual compass flies waypoint mission")
+            self.arm_vehicle()
+            self.wait_waypoint(0, num_wp-1, max_dist=5, timeout=180)
+
+            self.start_subtest("virtual compass mission lands and disarms")
+            self.wait_disarmed(timeout=120)
+            self.check_virtual_compass_status(require_alignment=True)
+
+        except Exception as e:
+            self.disarm_vehicle(force=True)
+            self.print_exception_caught(e)
+            ex = e
+        self.context_pop()
+        self.reboot_sitl()
+        if ex is not None:
+            raise ex
+
+    def VirtualCompassMission(self):
+        '''test EKF3 virtual compass yaw source while flying an AUTO waypoint mission'''
+        self.fly_virtual_compass_mission()
+
+    def VirtualCompassMissionRateThread(self):
+        '''test EKF3 virtual compass yaw source and fast rate thread while flying an AUTO waypoint mission'''
+        self.fly_virtual_compass_mission(rate_thread=True)
 
     def FlyRangeFinderMAVlink(self):
         '''fly mavlink-connected rangefinder'''
@@ -16390,6 +16605,10 @@ return update, 1000
             self.MotorTest,
             self.AltEstimation,
             self.EKFSource,
+            self.VirtualCompass,
+            self.VirtualCompassRateThread,
+            self.VirtualCompassMission,
+            self.VirtualCompassMissionRateThread,
             self.GSF,
             self.GSF_reset,
             self.AP_Avoidance,

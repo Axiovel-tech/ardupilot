@@ -51,6 +51,9 @@ enum DroneShowLEDType {
 
     // LED light is attached to servo channels and respects configured min/max limits; zero not handled differently
     DroneShowLEDType_ServoWithLimits = 14,
+
+    // LED light is to be forwarded to a NeoPixel RGBW LED strip with GRBW wire order
+    DroneShowLEDType_NeoPixel_GRBW = 15,
 };
 
 class DroneShowLEDFactory

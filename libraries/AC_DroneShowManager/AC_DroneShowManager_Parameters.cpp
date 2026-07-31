@@ -11,7 +11,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Description: Start time of drone show as a GPS time of week timestamp (sec), negative if unset. See also SHOW_START_MSEC.
     // @Range: -1 604799
     // @Increment: 1
-    // @Units: sec
+    // @Units: s
     // @Volatile: True
     // @User: Standard
     //
@@ -36,7 +36,6 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Description: Latitude of the origin of the drone show coordinate system, zero if unset
     // @Range: -900000000 900000000
     // @Increment: 1
-    // @Units: 1e-7 degrees
     // @User: Standard
     AP_GROUPINFO("ORIGIN_LAT", 2, AC_DroneShowManager, _params.origin_lat, 0),
 
@@ -45,7 +44,6 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Description: Longitude of the origin of the drone show coordinate system, zero if unset
     // @Range: -1800000000 1800000000
     // @Increment: 1
-    // @Units: 1e-7 degrees
     // @User: Standard
     AP_GROUPINFO("ORIGIN_LNG", 3, AC_DroneShowManager, _params.origin_lng, 0),
 
@@ -63,7 +61,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Description: Orientation of the X axis of the show coordinate system in CW direction relative to North, -1 if unset
     // @Range: -1 360
     // @Increment: 1
-    // @Units: degrees
+    // @Units: deg
     // @User: Standard
     AP_GROUPINFO("ORIENTATION", 4, AC_DroneShowManager, _params.orientation_deg, -1),
 
@@ -78,7 +76,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: LED0_TYPE
     // @DisplayName: Assignment of LED channel 0 to a LED output type
     // @Description: Specifies where the output of the main LED light track of the show should be sent
-    // @Values: 0:Off, 1:MAVLink, 2:NeoPixel, 3:ProfiLED, 4:Debug, 5:SITL, 6:Servo, 7:I2C RGB, 8:Inverted servo, 9:UART (WGDrones), 10:NeoPixel RGBW, 11:I2C RGBW, 12:Notification LED, 13:Servo with limits (off=0), 14:Servo with limits
+    // @Values: 0:Off, 1:MAVLink, 2:NeoPixel, 3:ProfiLED, 4:Debug, 5:SITL, 6:Servo, 7:I2C RGB, 8:Inverted servo, 9:UART (WGDrones), 10:NeoPixel RGBW, 11:I2C RGBW, 12:Notification LED, 13:Servo with limits (off=0), 14:Servo with limits, 15:NeoPixel GRBW
     // @User: Advanced
     AP_GROUPINFO("LED0_TYPE", 6, AC_DroneShowManager, _params.led_specs[0].type, 0),
 
@@ -118,10 +116,52 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("LED0_MINBRI", 32, AC_DroneShowManager, _params.led_specs[0].min_brightness, 0.0f),
 
+    // @Param: LED1_TYPE
+    // @DisplayName: Assignment of LED channel 1 to a LED output type
+    // @Description: Specifies where the output of the main LED light track of the show should be sent for the second physical LED output
+    // @Values: 0:Off, 1:MAVLink, 2:NeoPixel, 3:ProfiLED, 4:Debug, 5:SITL, 6:Servo, 7:I2C RGB, 8:Inverted servo, 9:UART (WGDrones), 10:NeoPixel RGBW, 11:I2C RGBW, 12:Notification LED, 13:Servo with limits (off=0), 14:Servo with limits, 15:NeoPixel GRBW
+    // @User: Advanced
+    AP_GROUPINFO("LED1_TYPE", 40, AC_DroneShowManager, _params.led_specs[1].type, 0),
+
+    // @Param: LED1_CHAN
+    // @DisplayName: PWM, MAVLink or UART channel to use for the second LED output
+    // @Description: PWM channel to use for the second LED output (1-based) if the LED type is "NeoPixel", "ProfiLED" or "NeoPixel RGBW"; the MAVLink channel to use if the LED type is "MAVLink"; the I2C address of the LED if the LED type is "I2C"; the UART index if the LED type is "WGDrones". For UART-driven LEDs, you also need to set the baud rate in SERIALx_BAUD and set SERIALx_PROTOCOL to "Scripting" to ensure that the UART is initialized.
+    // @User: Advanced
+    AP_GROUPINFO("LED1_CHAN", 41, AC_DroneShowManager, _params.led_specs[1].channel, 0),
+
+    // @Param: LED1_COUNT
+    // @DisplayName: Number of individual LEDs on the second LED channel
+    // @Description: For NeoPixel or ProfiLED LED strips: specifies how many LEDs there are on the second strip. For I2C LEDs: specifies the index of the bus that the LED is attached to.
+    // @User: Advanced
+    AP_GROUPINFO("LED1_COUNT", 42, AC_DroneShowManager, _params.led_specs[1].count, 16),
+
+    // @Param: LED1_GAMMA
+    // @DisplayName: Gamma correction factor for the second LED channel
+    // @Description: Specifies the exponent of the gamma correction to apply on the RGB values of this channel. Set this to 1 if you do not want to use gamma correction or if the LEDs perform gamma correction on their own; otherwise typical values are in the range 2.2 to 2.8 for LEDs. Set a value that provides an approximately linear perceived brightness response when the LEDs are faded from full black to full white.
+    // @Range: 1 5
+    // @Increment: 0.1
+    // @User: Advanced
+    AP_GROUPINFO("LED1_GAMMA", 43, AC_DroneShowManager, _params.led_specs[1].gamma, 1.0f),
+
+    // @Param: LED1_WTEMP
+    // @DisplayName: Color temperature of the white LED of the second channel
+    // @Description: Specifies the color temperature of the white LED of the second channel if the channel makes use of an additional white LED. Set to zero if you don't know the color temperature of the white LED or if there is no white LED.
+    // @Range: 0 15000
+    // @Increment: 100
+    // @User: Advanced
+    AP_GROUPINFO("LED1_WTEMP", 44, AC_DroneShowManager, _params.led_specs[1].white_temperature, 0.0f),
+
+    // @Param: LED1_MINBRI
+    // @DisplayName: Minimum brightness threshold for the second LED channel
+    // @Description: Minimum brightness threshold (as a ratio 0.0-1.0) below which the second LED output is turned off completely
+    // @Range: 0 1
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED1_MINBRI", 45, AC_DroneShowManager, _params.led_specs[1].min_brightness, 0.0f),
+
     // @Param: MODE_BOOT
     // @DisplayName: Conditions for entering show mode
     // @Description: Bitfield that specifies when the drone should switch to show mode automatically
-    // @Values: 3:At boot and when authorized,2:When authorized,1:At boot,0:Never
     // @Bitmask: 0:At boot,1:When authorized
     // @User: Standard
     AP_GROUPINFO("MODE_BOOT", 9, AC_DroneShowManager, _params.show_mode_settings, 2),
@@ -137,7 +177,6 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: CTRL_MODE
     // @DisplayName: Flags to configure the show position control algorithm
     // @Description: Controls various aspects of the position control algorithm built into the firmware
-    // @Values: 1:Position and velocity control,0:Position control only
     // @Bitmask: 0:Enable velocity control,1:Unused (was acceleration control)
     // @User: Advanced
     AP_GROUPINFO("CTRL_MODE", 11, AC_DroneShowManager, _params.control_mode_flags, DroneShowControl_VelocityControlEnabled),
@@ -212,7 +251,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: HFENCE_TO
     // @DisplayName: Hard fence timeout
     // @Description: Minimum time that the vehicle needs to spend outside the hard geofence to trigger a motor shutdown
-    // @Units: sec
+    // @Units: s
     // @Range: 0 120
     // @User: Standard
     AP_GROUPINFO("HFENCE_TO", 22, AC_DroneShowManager, hard_fence._params.timeout, 5),
@@ -268,7 +307,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: BFENCE_TO
     // @DisplayName: Bubble fence timeout
     // @Description: Minimum time that the bubble fence needs to be breached to trigger the associated action
-    // @Units: sec
+    // @Units: s
     // @Range: 0 120
     // @User: Standard
     AP_GROUPINFO("BFENCE_TO", 30, AC_DroneShowManager, bubble_fence._params.timeout, 5),

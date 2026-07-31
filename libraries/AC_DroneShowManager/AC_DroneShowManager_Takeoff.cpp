@@ -62,7 +62,8 @@ float AC_DroneShowManager::get_time_until_takeoff_sec()
 
 bool AC_DroneShowManager::is_prepared_to_take_off() const
 {
-    return (!_preflight_check_failures && _is_gps_time_ok());
+    return !_preflight_check_failures &&
+           (_is_gps_time_ok() || !uses_gps_time_for_show_start());
 }
 
 bool AC_DroneShowManager::notify_takeoff_attempt()

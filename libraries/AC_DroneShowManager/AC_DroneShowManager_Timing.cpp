@@ -115,6 +115,30 @@ float AC_DroneShowManager::get_time_until_start_sec() const
 
 uint32_t AC_DroneShowManager::_get_gps_synced_timestamp_in_millis_for_lights() const
 {
+    // A start scheduled on the internal clock is the fleet's shared reference:
+    // every drone schedules it from the same fleet-wide event (the RC start
+    // switch flip, a GCS schedule or a timecode cue), so a start-anchored
+    // phase agrees across drones to within that event's delivery jitter.
+    // This branch comes FIRST, before the GPS-time branch: _is_gps_time_ok()
+    // latches for the rest of the boot once a GPS ever delivered week+ToW,
+    // so in a mixed fleet (some drones briefly saw GPS time, some did not) a
+    // GPS-epoch phase would disagree with the millis() fallback of the
+    // GPS-less drones. When the show runs on the internal clock, the
+    // scheduled instant is the authoritative common timebase for everyone.
+    // The GPS sync mode is excluded: there the start itself lives on the GPS
+    // timebase, and without GPS time the internal reference would not apply.
+    if (!uses_gps_time_for_show_start() && has_scheduled_start_time()) {
+        int64_t elapsed_usec = get_elapsed_time_since_start_usec();
+        if (elapsed_usec != INT64_MIN && elapsed_usec != INT64_MAX) {
+            // Truncating the (possibly negative) elapsed time to uint32_t
+            // yields a phase that still agrees across drones before the
+            // start; the one small phase step at the sign wrap coincides
+            // with the show starting, where the light program takes over
+            // anyway.
+            return static_cast<uint32_t>(static_cast<uint64_t>(elapsed_usec / 1000));
+        }
+    }
+
     // No need to worry about loss of GPS fix; AP::gps().time_epoch_usec() is
     // smart enough to extrapolate from the timestamp of the latest fix.
     //
@@ -123,9 +147,9 @@ uint32_t AC_DroneShowManager::_get_gps_synced_timestamp_in_millis_for_lights() c
     // the high bits.
     if (_is_gps_time_ok()) {
         return get_gps_timestamp_usec() / 1000;
-    } else {
-        return AP_HAL::millis();
     }
+
+    return AP_HAL::millis();
 }
 
 bool AC_DroneShowManager::_is_gps_time_ok() const

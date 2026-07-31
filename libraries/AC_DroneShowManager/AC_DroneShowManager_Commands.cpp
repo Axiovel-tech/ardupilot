@@ -1,3 +1,4 @@
+#include <AP_Notify/AP_Notify.h>
 #include <GCS_MAVLink/GCS.h>
 #include <skybrush/skybrush.h>
 
@@ -116,6 +117,28 @@ MAV_RESULT AC_DroneShowManager::handle_command_int_packet(const mavlink_command_
         } else if (is_equal(packet.param1, 1.0f)) {
             // Reserved for debugging purposes
             return _run_debug_request_handler(packet) ? MAV_RESULT_ACCEPTED : MAV_RESULT_FAILED;
+        } else if (is_equal(packet.param1, 2.0f)) {
+            // Shutdown blackout: the companion computer (RTLS link board) is
+            // about to cut this flight controller's power rail, but the show
+            // LED strip is powered from a rail that stays up and would keep
+            // displaying the last commanded color. param2 >= 0.5 latches the
+            // LED output to black until power is actually cut (with a timed
+            // auto-expiry as a safety net, refreshed by repeated commands);
+            // param2 < 0.5 cancels the latch after an aborted power-off.
+            //
+            // The COMMAND_ACK generated from this result is the companion
+            // computer's cue that it is safe to cut the rail.
+            if (packet.param2 >= 0.5f) {
+                if (AP_Notify::flags.armed || AP_Notify::flags.flying) {
+                    // A power-off is never legitimate while armed; refuse
+                    // loudly rather than blanking the lights in the air.
+                    return MAV_RESULT_DENIED;
+                }
+                _shutdown_blackout_until_msec = AP_HAL::millis() + SHUTDOWN_BLACKOUT_TIMEOUT_MSEC;
+            } else {
+                _shutdown_blackout_until_msec = 0;
+            }
+            return MAV_RESULT_ACCEPTED;
         }
 
         // Unsupported command code

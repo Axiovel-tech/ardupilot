@@ -11,6 +11,17 @@
 // Group mask indicating all groups
 #define ALL_GROUPS 0
 
+// AXIOVEL fork (rtls-link-zephyr#120): minimum interval between two frames
+// pushed to the physical LEDs by _update_lights(). _update_lights() is
+// evaluated on every 50 Hz tick (20 ms); this throttle is only a safety
+// floor against a future faster evaluation rate flooding a slow backend —
+// at 15 ms it never binds at the current 50 Hz, so every changed evaluation
+// goes straight to the strip (the NeoPixel path is DMA-driven: a 24-LED
+// GRBW frame costs ~1 ms of wire time and near-zero CPU, comfortably
+// supporting 60+ fps for music-dynamic shows; raising the update() task
+// rate is the knob for that).
+#define LED_PUSH_MIN_INTERVAL_MSEC 15
+
 // Undefine some macros from RGBLed.h that are in comflict with the code below
 #undef BLACK
 #undef RED
@@ -236,6 +247,19 @@ bool AC_DroneShowManager::_handle_led_control_message(const mavlink_message_t& m
     return true;
 }
 
+bool AC_DroneShowManager::_shutdown_blackout_active()
+{
+    if (_shutdown_blackout_until_msec) {
+        if (AP_HAL::millis() < _shutdown_blackout_until_msec) {
+            return true;
+        }
+        // The promised power-off never arrived; expire the latch and resume
+        // normal light signals
+        _shutdown_blackout_until_msec = 0;
+    }
+    return false;
+}
+
 void AC_DroneShowManager::_update_lights()
 {
     // TODO(ntamas): mode numbers are hardcoded here; we cannot import them
@@ -273,6 +297,15 @@ void AC_DroneShowManager::_update_lights()
     (mode == MODE_DRONE_SHOW && _stage_in_drone_show_mode == DroneShow_RTL) \
 )
 
+    // A shutdown blackout (companion computer about to cut our power rail;
+    // MAV_CMD_USER_2 sub-command 2) trumps everything: the LED strip stays
+    // powered when this MCU goes down, so whatever color survives here is
+    // what the dark drone keeps displaying. Keep repainting black until the
+    // power actually dies (or the latch expires / is cancelled).
+    if (_shutdown_blackout_active()) {
+        color = Colors::BLACK;
+        light_signal_affected_by_brightness_setting = false;
+    } else
     // During compass calibration, the light should be purple no matter what.
     // Compass calibration is always requested by the user so he can rightly
     // expect any light signal that was previously set up from the GCS to be
@@ -546,31 +579,76 @@ void AC_DroneShowManager::_update_lights()
 
     _last_rgb_led_color = color;
 
-    if (_rgb_led) {
+    // AXIOVEL fork (rtls-link-zephyr#120): this function now runs on every
+    // 50 Hz tick (previously every other tick) so that light transitions --
+    // most importantly the start-anchored pre-start blink -- are quantized to
+    // +/-20 ms instead of +/-40 ms. To keep the effective output frame rate
+    // to the physical LEDs identical to the previous 25 Hz behavior, actual
+    // pushes are throttled to at most one per LED_PUSH_MIN_INTERVAL_MSEC.
+    // When the strip has been idle (a stable color pushes no frames because
+    // DroneShowLED::set_rgbw() is a no-op while the color is unchanged and
+    // the repeat count is exhausted), the next color change goes out
+    // immediately -- which is exactly where the improved quantization
+    // matters. When colors change on every tick (show playback), pushes
+    // settle on the same every-other-tick 25 Hz cadence as before.
+    const uint32_t now_push_msec = AP_HAL::millis();
+    if (now_push_msec - _last_rgb_led_push_at_msec >= LED_PUSH_MIN_INTERVAL_MSEC) {
+
+    bool flush_needed[RGB_LED_OUTPUT_COUNT];
+    bool any_frame_pushed = false;
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        flush_needed[i] = false;
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        DroneShowLED* rgb_led = _rgb_leds[i];
+
+        if (!rgb_led) {
+            continue;
+        }
+
         // No need to test whether the RGB values or the gamma correction
         // changed because the LED classes do this on their own
-        _rgb_led->set_gamma(_params.led_specs[0].gamma);
+        rgb_led->set_gamma(_params.led_specs[i].gamma);
 
-        if (_rgb_led->supports_white_channel()) {
+        if (rgb_led->supports_white_channel()) {
             // Code path for LEDs that support a white channel
             sb_rgbw_conversion_t conv;
             sb_rgbw_color_t rgbw_color;
 
             if (enhance_brightness && color.red == color.green && color.green == color.blue) {
                 sb_rgbw_conversion_use_fixed_value(&conv, color.red);
-            } else if (_params.led_specs[0].white_temperature > 0) {
-                sb_rgbw_conversion_use_color_temperature(&conv, _params.led_specs[0].white_temperature);
+            } else if (_params.led_specs[i].white_temperature > 0) {
+                sb_rgbw_conversion_use_color_temperature(&conv, _params.led_specs[i].white_temperature);
             } else {
                 sb_rgbw_conversion_use_min_subtraction(&conv);
             }
 
             rgbw_color = sb_rgb_color_to_rgbw(color, conv);
-            _rgb_led->set_rgbw(rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white);
+            flush_needed[i] = rgb_led->set_rgbw(
+                rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white, false
+            );
         } else {
             // Code path for standard RGB LEDs
-            _rgb_led->set_rgb(color.red, color.green, color.blue);
+            flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
+        }
+
+        any_frame_pushed |= flush_needed[i];
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i] && flush_needed[i]) {
+            _rgb_leds[i]->flush();
         }
     }
+
+    if (any_frame_pushed) {
+        // Only remember pushes that actually put a frame on the wire so an
+        // idle strip does not delay the next transition
+        _last_rgb_led_push_at_msec = now_push_msec;
+    }
+
+    } // end of push throttle (AXIOVEL fork)
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     if (_sock_rgb_open) {
@@ -593,53 +671,67 @@ void AC_DroneShowManager::_update_lights()
 
 void AC_DroneShowManager::_update_rgb_led_instance()
 {
-    static int previous_led_type = -1;
-    static uint8_t previous_channel = 255;
-    static uint8_t previous_num_leds = 0;
+    static bool previous_settings_initialized = false;
+    static int previous_led_type[RGB_LED_OUTPUT_COUNT];
+    static uint8_t previous_channel[RGB_LED_OUTPUT_COUNT];
+    static uint8_t previous_num_leds[RGB_LED_OUTPUT_COUNT];
 
-    // We need to avoid the re-creation of _rgb_led if the type of the LED did
+    if (!previous_settings_initialized) {
+        for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+            previous_led_type[i] = -1;
+            previous_channel[i] = 255;
+            previous_num_leds[i] = 0;
+        }
+        previous_settings_initialized = true;
+    }
+
+    // We need to avoid the re-creation of RGB LEDs if the type of the LED did
     // not change because it causes problems with I2C LEDs on a MatekH743 Slim,
     // leading to watchdog timeouts
 
     if (_rgb_led_factory) {
-        int led_type = _params.led_specs[0].type;
-        uint8_t channel = _params.led_specs[0].channel;
-        uint8_t num_leds = _params.led_specs[0].count;
-        float min_brightness = _params.led_specs[0].min_brightness;
+        for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+            int led_type = _params.led_specs[i].type;
+            uint8_t channel = _params.led_specs[i].channel;
+            uint8_t num_leds = _params.led_specs[i].count;
+            float min_brightness = _params.led_specs[i].min_brightness;
 
-        if (
-            led_type != previous_led_type ||
-            channel != previous_channel ||
-            num_leds != previous_num_leds
-        ) {
-            // Turn off the old RGB LED
-            if (_rgb_led)
-            {
-                _rgb_led->set_rgb(0, 0, 0);
+            if (
+                led_type != previous_led_type[i] ||
+                channel != previous_channel[i] ||
+                num_leds != previous_num_leds[i]
+            ) {
+                // Turn off the old RGB LED
+                if (_rgb_leds[i])
+                {
+                    _rgb_leds[i]->set_rgb(0, 0, 0);
 
-                delete _rgb_led;
-                _rgb_led = NULL;
+                    delete _rgb_leds[i];
+                    _rgb_leds[i] = NULL;
+                }
+
+                // Construct the new LED
+                _rgb_leds[i] = _rgb_led_factory->new_rgb_led_by_type(
+                    static_cast<DroneShowLEDType>(led_type), channel, num_leds, min_brightness
+                );
+
+                // Store the settings
+                previous_led_type[i] = led_type;
+                previous_channel[i] = channel;
+                previous_num_leds[i] = num_leds;
             }
-
-            // Construct the new LED
-            _rgb_led = _rgb_led_factory->new_rgb_led_by_type(
-                static_cast<DroneShowLEDType>(led_type), channel, num_leds, min_brightness
-            );
-
-            // Store the settings
-            previous_led_type = led_type;
-            previous_channel = channel;
-            previous_num_leds = num_leds;
         }
     }
 
-    if (_rgb_led) {
-        // Update gamma correction parameter of LED
-        float gamma = _params.led_specs[0].gamma;
-        _rgb_led->set_gamma(gamma);
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i]) {
+            // Update gamma correction parameter of LED
+            float gamma = _params.led_specs[i].gamma;
+            _rgb_leds[i]->set_gamma(gamma);
 
-        // Update minimum brightness
-        _rgb_led->set_min_brightness(_params.led_specs[0].min_brightness);
+            // Update minimum brightness
+            _rgb_leds[i]->set_min_brightness(_params.led_specs[i].min_brightness);
+        }
     }
 }
 
@@ -667,8 +759,20 @@ bool AC_DroneShowManager::_open_rgb_led_socket()
 
 void AC_DroneShowManager::_repeat_last_rgb_led_command()
 {
-    if (_rgb_led) {
-        _rgb_led->repeat_last_command_if_needed();
+    bool flush_needed[RGB_LED_OUTPUT_COUNT];
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        flush_needed[i] = false;
+
+        if (_rgb_leds[i]) {
+            flush_needed[i] = _rgb_leds[i]->repeat_last_command_if_needed(false);
+        }
+    }
+
+    for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
+        if (_rgb_leds[i] && flush_needed[i]) {
+            _rgb_leds[i]->flush();
+        }
     }
 }
 

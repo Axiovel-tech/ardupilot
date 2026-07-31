@@ -1013,7 +1013,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
 
 #if MODE_DRONE_SHOW_ENABLED
     // @Group: SHOW_
-    // @Path: ../libraries/AC_DroneShowManager/AC_DroneShowManager.cpp
+    // @Path: ../libraries/AC_DroneShowManager/AC_DroneShowManager.cpp,../libraries/AC_DroneShowManager/AC_DroneShowManager_Parameters.cpp
     //
     // This is group 62; it is intentional as we don't want to assign ourselves
     // a new group ID when new groups are added by the ArduCopter developers.

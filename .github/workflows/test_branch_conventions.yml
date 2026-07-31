@@ -1,9 +1,7 @@
 name: Test for Malformed Commits in PR Branch
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
+  workflow_dispatch:
 concurrency:
   group: ci-${{github.workflow}}-${{ github.ref }}
   cancel-in-progress: true

@@ -521,8 +521,10 @@ public:
     // Updates the state of the LED light on the drone and performs any additional
     // tasks that have to be performed regularly (such as checking for changes
     // in parameter values). This has to be called at 50 Hz, but most of its
-    // subroutines run at 25 Hz, except _repeat_last_rgb_led_command(), which
-    // may be called more frequently.
+    // subroutines run at 25 Hz. _update_lights() and
+    // _repeat_last_rgb_led_command() may be called more frequently
+    // (AXIOVEL fork, rtls-link-zephyr#120: _update_lights() now runs on every
+    // tick so light transitions are quantized to +/-20 ms).
     void update();
 
     // Returns whether the manager uses GPS time to start the show
@@ -545,6 +547,9 @@ public:
     void write_show_event_log_message(const struct sb_event_s *event, DroneShowEventResult result) const;
 
     static const struct AP_Param::GroupInfo var_info[];
+
+    // Number of physical RGB LED outputs driven from the logical show light.
+    static constexpr uint8_t RGB_LED_OUTPUT_COUNT = 2;
 
     // Hard fence subsystem. This should really have to be in Copter or some
     // other top-level class; we put it here because we are trying to restrict
@@ -651,7 +656,7 @@ private:
 
             // Minimum brightness threshold (as a ratio 0-1) below which LED is turned off
             AP_Float min_brightness;
-        } led_specs[1];
+        } led_specs[RGB_LED_OUTPUT_COUNT];
 
         struct {
             // Specifies the type of the pyrotechnic device
@@ -814,11 +819,17 @@ private:
     // Factory object that can create RGBLed instances that the drone show manager will control
     DroneShowLEDFactory* _rgb_led_factory;
 
-    // RGB led that the drone show manager controls
-    DroneShowLED* _rgb_led;
+    // RGB leds that the drone show manager controls
+    DroneShowLED* _rgb_leds[RGB_LED_OUTPUT_COUNT];
 
     // Last RGB color that was sent to the RGB led
     sb_rgb_color_t _last_rgb_led_color;
+
+    // AXIOVEL fork (rtls-link-zephyr#120): timestamp of the last frame that
+    // was actually pushed to the physical LEDs; used by _update_lights() to
+    // keep the effective LED output frame rate at its pre-fork 25 Hz maximum
+    // now that the color is evaluated on every 50 Hz tick
+    uint32_t _last_rgb_led_push_at_msec;
 
     // Last guided mode command that was sent
     GuidedModeCommand _last_setpoint;
@@ -828,6 +839,21 @@ private:
 
     // Timestamp that defines whether the RC start switch is blocked (and if so, until when)
     uint32_t _rc_switches_blocked_until;
+
+    // Deadline (AP_HAL::millis()) until which the show LED output is forced to
+    // black because a companion computer signalled an imminent power-off of
+    // this flight controller (MAV_CMD_USER_2, sub-command 2). The LED strip is
+    // powered from a rail that stays up when the FC rail is cut, so it would
+    // otherwise keep displaying the last commanded color indefinitely. Zero
+    // when inactive; expires on its own in case the power-off never follows.
+    uint32_t _shutdown_blackout_until_msec;
+
+    // How long a shutdown blackout request stays latched without being
+    // refreshed. Long enough for the companion computer to cut our power
+    // after receiving the COMMAND_ACK, short enough that an aborted
+    // power-off does not leave the drone dark for long even if the explicit
+    // cancel command is lost.
+    static constexpr uint32_t SHUTDOWN_BLACKOUT_TIMEOUT_MSEC = 10000;
 
     // Copy of the STAT_BOOTCNT parameter value at boot; we will send the lower
     // two bits of this value regularly in status packets to allow the GCS to
@@ -839,6 +865,10 @@ private:
 
     // Returns whether the RC switches are currently blocked
     bool _are_rc_switches_blocked();
+
+    // Returns whether the shutdown blackout is currently forcing the LEDs
+    // dark, clearing the latch when it has expired
+    bool _shutdown_blackout_active();
 
     // Checks whether there were any changes in the parameters relevant to the
     // execution of the drone show. This has to be called regularly from update()

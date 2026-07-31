@@ -193,6 +193,41 @@ void RC_Channels::read_aux_all()
 #endif
 }
 
+// AXIOVEL fork (rtls-link-zephyr#120): evaluate only the channel(s) mapped to
+// the DRONE_SHOW_START aux function. Called from the vehicle's fast rc loop
+// (250 Hz on Copter) in addition to the regular 10 Hz read_aux_all() sweep so
+// that the RC-triggered show start is detected with millisecond-level skew
+// across the fleet instead of up to ~100 ms of per-drone scheduler phase.
+// RC_Channel::read_aux() only runs the aux function on a debounced position
+// *change* (debounce_completed() returns false while the position is
+// unchanged), so the slower sweep re-reading the same channel stays a
+// harmless no-op and the function still fires exactly once per flip.
+void RC_Channels::read_aux_show_start()
+{
+    if (!has_valid_input()) {
+        // exit immediately when no RC input
+        return;
+    }
+    bool need_log = false;
+
+    for (uint8_t i=0; i<NUM_RC_CHANNELS; i++) {
+        RC_Channel *c = channel(i);
+        if (c == nullptr) {
+            continue;
+        }
+        if ((RC_Channel::AUX_FUNC)c->option.get() != RC_Channel::AUX_FUNC::DRONE_SHOW_START) {
+            continue;
+        }
+        need_log |= c->read_aux();
+    }
+#if HAL_LOGGING_ENABLED
+    if (need_log) {
+        // guarantee that we log when a switch changes
+        AP::logger().Write_RCIN();
+    }
+#endif
+}
+
 void RC_Channels::init_aux_all()
 {
     for (uint8_t i=0; i<NUM_RC_CHANNELS; i++) {
