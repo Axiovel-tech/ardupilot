@@ -16,7 +16,7 @@ bool AC_DroneShowManager_Copter::get_current_location(Location& loc) const
 
 bool AC_DroneShowManager_Copter::get_current_relative_position_NED_origin(Vector3f& vec) const
 {
-    return copter.ahrs.get_relative_position_NED_origin(vec);
+    return copter.ahrs.get_relative_position_NED_origin_float(vec);
 }
 
 void AC_DroneShowManager_Copter::_request_switch_to_show_mode()
@@ -80,9 +80,9 @@ bool ModeDroneShow::allows_arming(AP_Arming::Method method) const
 // We need to override the default implementation of Mode::do_user_takeoff_start()
 // because that one would require the pilot to use the throttle to take off.
 // Here we simply send the drone to the "takeoff" state.
-bool ModeDroneShow::do_user_takeoff_start(float takeoff_alt_cm)
+bool ModeDroneShow::do_user_takeoff_start_m(float takeoff_alt_m)
 {
-    // takeoff_alt_cm is ignored. This is deliberate; I do not want to complicate
+    // takeoff_alt_m is ignored. This is deliberate; I do not want to complicate
     // the logic in takeoff_start(). The takeoff altitude can be configured in
     // a parameter (SHOW_TAKEOFF_ALT)
     if (try_to_start_motors_if_prepared_to_take_off()) {
@@ -104,7 +104,7 @@ bool ModeDroneShow::do_user_takeoff_start(float takeoff_alt_cm)
 
 int32_t ModeDroneShow::get_default_yaw_cd() const
 {
-    return copter.initial_armed_bearing;
+    return rad_to_cd(copter.initial_armed_bearing_rad);
 }
 
 int32_t ModeDroneShow::get_elapsed_time_since_last_home_position_reset_attempt_msec() const
@@ -224,45 +224,45 @@ bool ModeDroneShow::get_wp(Location& destination) const
     }
 }
 
-int32_t ModeDroneShow::wp_bearing() const
+float ModeDroneShow::wp_bearing_deg() const
 {
     switch (_stage) {
     case DroneShow_Performing:
-        return copter.mode_guided.wp_bearing();
+        return copter.mode_guided.wp_bearing_deg();
     case DroneShow_Landing:
-        return copter.mode_land.wp_bearing();
+        return copter.mode_land.wp_bearing_deg();
     case DroneShow_RTL:
-        return copter.mode_rtl.wp_bearing();
+        return copter.mode_rtl.wp_bearing_deg();
     default:
         return false;
     }
 }
 
-uint32_t ModeDroneShow::wp_distance() const
+float ModeDroneShow::wp_distance_m() const
 {
     switch (_stage) {
     case DroneShow_Performing:
-        return copter.mode_guided.wp_distance();
+        return copter.mode_guided.wp_distance_m();
     case DroneShow_Landing:
-        return copter.mode_land.wp_distance();
+        return copter.mode_land.wp_distance_m();
     case DroneShow_RTL:
-        return copter.mode_rtl.wp_distance();
+        return copter.mode_rtl.wp_distance_m();
     default:
         return false;
     }
 }
 
-float ModeDroneShow::crosstrack_error() const
+float ModeDroneShow::crosstrack_error_m() const
 {
     switch (_stage) {
     case DroneShow_Performing:
-        return copter.mode_guided.crosstrack_error();
+        return copter.mode_guided.crosstrack_error_m();
     case DroneShow_Loiter:
-        return copter.mode_loiter.crosstrack_error();
+        return copter.mode_loiter.crosstrack_error_m();
     case DroneShow_Landing:
-        return copter.mode_land.crosstrack_error();
+        return copter.mode_land.crosstrack_error_m();
     case DroneShow_RTL:
-        return copter.mode_rtl.crosstrack_error();
+        return copter.mode_rtl.crosstrack_error_m();
     default:
         return false;
     }
@@ -315,7 +315,7 @@ void ModeDroneShow::initialization_start()
     // This is copied from ModeAuto::init()
 
     // initialise waypoint and spline controller
-    wp_nav->wp_and_spline_init();
+    wp_nav->wp_and_spline_init_m();
 
     // Clear the limits of the guided mode; we will use guided mode internally
     // to control the show
@@ -382,11 +382,11 @@ void ModeDroneShow::wait_for_start_time_run()
     // Drone is in standby so keep all I terms in controllers at zero
     attitude_control->reset_yaw_target_and_rate();
     attitude_control->reset_rate_controller_I_terms();
-    pos_control->standby_xyz_reset();
+    pos_control->NED_standby_reset();
 
     // Force attitude controller to zero target angles and yaw rate in case it
     // received something else from somewhere before we switched to this mode
-    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(0.0f, 0.0f, 0.0f);
+    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw_cd(0.0f, 0.0f, 0.0f);
 
     // This is copied from ModeStabilize::run() -- it is needed to allow the 
     // user to turn on the motors and spin them up while idling on the ground.
@@ -548,10 +548,10 @@ void ModeDroneShow::takeoff_start()
     // ModeAuto::takeoff_start()
 
     // clear I term when we're taking off
-    pos_control->init_z_controller();
+    pos_control->D_init_controller();
 
     // initialise alt for WP_NAVALT_MIN and set completion altitude.
-    auto_takeoff.start(target_alt, /* terrain_alt = */ false);
+    auto_takeoff.start_m(target_alt * 0.01f, /* is_terrain_alt = */ false);
 
     // part adapted from ModeAuto::takeoff_start() ends here
 
@@ -570,10 +570,10 @@ void ModeDroneShow::takeoff_start()
     // be zero if it was never used) and slowly slew to the desired angle. We
     // force the current yaw angle to be initialized by also calling
     // set_yaw_angle_rate(), which seems to set the internal yaw angle immediately
-    auto_yaw.set_yaw_angle_rate(get_default_yaw_cd() * 0.01f, 0);
-    auto_yaw.set_fixed_yaw(
-        get_default_yaw_cd() * 0.01f,  /* [cd] -> [deg] */
-        /* turn_rate_dps = */ 0, /* direction = */ 0, /* relative_angle = */ 0
+    auto_yaw.set_yaw_angle_and_rate_rad(cd_to_rad(get_default_yaw_cd()), 0);
+    auto_yaw.set_fixed_yaw_rad(
+        cd_to_rad(get_default_yaw_cd()),  /* [cd] -> [rad] */
+        /* turn_rate_rads = */ 0, /* direction = */ 0, /* relative_angle = */ 0
     );
 
     // pretend that we were armed by the user by raising the throttle; the auto
@@ -1033,12 +1033,23 @@ bool ModeDroneShow::send_guided_mode_command_during_performance()
             // the show manager, in which case we just _pretend_ that the command was
             // sent but we don' actually do anything
             if (!show_manager->is_motor_output_disabled()) {
-                copter.mode_guided.set_destination_posvelaccel(
-                    command.pos, command.vel, command.acc,
+                // ArduPilot 4.7 guided API takes NED metres; the show manager
+                // still produces NEU centimetres internally.
+                const Vector3p pos_ned_m {
+                    command.pos.x * 0.01, command.pos.y * 0.01, -command.pos.z * 0.01
+                };
+                const Vector3f vel_ned_ms {
+                    command.vel.x * 0.01f, command.vel.y * 0.01f, -command.vel.z * 0.01f
+                };
+                const Vector3f accel_ned_mss {
+                    command.acc.x * 0.01f, command.acc.y * 0.01f, -command.acc.z * 0.01f
+                };
+                copter.mode_guided.set_pos_vel_accel_NED_m(
+                    pos_ned_m, vel_ned_ms, accel_ned_mss,
                     /* use_yaw = */ true,
-                    command.yaw_cd, /* [cd] */
+                    cd_to_rad(command.yaw_cd),
                     /* use_yaw_rate = */ true,
-                    command.yaw_rate_cds  /* [cd/s] */
+                    cd_to_rad(command.yaw_rate_cds)
                 );
             }
 
@@ -1056,7 +1067,7 @@ bool ModeDroneShow::send_guided_mode_command_during_performance()
         // switch to loiter mode
         if (show_manager->get_current_relative_position_NED_origin(pos)) {
             zero.zero();
-            copter.mode_guided.set_destination_posvelaccel(pos, zero, zero);
+            copter.mode_guided.set_pos_vel_accel_NED_m(pos.topostype(), zero, zero);
         }
 
         return false;

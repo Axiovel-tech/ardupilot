@@ -94,13 +94,13 @@ bool AC_DroneShowManager::configure_fences(DroneShow_FenceConfig& config)
     }
 
     // Set fence action
-    switch (config.action) {
-        case AC_FENCE_ACTION_REPORT_ONLY:
-        case AC_FENCE_ACTION_RTL_AND_LAND:
-        case AC_FENCE_ACTION_ALWAYS_LAND:
-        case AC_FENCE_ACTION_SMART_RTL:
-        case AC_FENCE_ACTION_SMART_RTL_OR_LAND:
-        case AC_FENCE_ACTION_BRAKE:
+    switch (static_cast<AC_Fence::Action>(config.action)) {
+        case AC_Fence::Action::REPORT_ONLY:
+        case AC_Fence::Action::RTL_AND_LAND:
+        case AC_Fence::Action::ALWAYS_LAND:
+        case AC_Fence::Action::SMART_RTL:
+        case AC_Fence::Action::SMART_RTL_OR_LAND:
+        case AC_Fence::Action::BRAKE:
             value = config.action;
             if (!AP_Param::set_and_save_by_name("FENCE_ACTION", value)) {
                 gcs().send_text(MAV_SEVERITY_ERROR, "FENCE_ACTION parameter cannot be set");
