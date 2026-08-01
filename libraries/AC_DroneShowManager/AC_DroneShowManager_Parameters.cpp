@@ -26,7 +26,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Description: Number of milliseconds to add to the start time of the show in the SHOW_START_TIME parameter.
     // @Range: 0 999
     // @Increment: 1
-    // @Units: msec
+    // @Units: ms
     // @Volatile: True
     // @User: Standard
     AP_GROUPINFO("START_MSEC", 46, AC_DroneShowManager, _params.start_time_gps_msec_offset, 0),
