@@ -10963,7 +10963,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.set_virtual_compass_parameters(initial_yaw, rate_thread=rate_thread)
             self.set_parameters({
                 "AUTO_OPTIONS": 3,
-                "WPNAV_SPEED": 500,
+                "WP_SPD": 5,  # m/s, renamed from WPNAV_SPEED in ArduPilot 4.7
             })
             self.upload_simple_relhome_mission([
                 (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, alt),
