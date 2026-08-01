@@ -29,7 +29,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Units: msec
     // @Volatile: True
     // @User: Standard
-    AP_GROUPINFO("START_MSEC", 40, AC_DroneShowManager, _params.start_time_gps_msec_offset, 0),
+    AP_GROUPINFO("START_MSEC", 46, AC_DroneShowManager, _params.start_time_gps_msec_offset, 0),
 
     // @Param: ORIGIN_LAT
     // @DisplayName: Show origin (latitude)
