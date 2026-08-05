@@ -799,13 +799,13 @@ void ModeDroneShow::performing_run()
                 loiter_start();
                 break;
             case PostAction_Land:
-                landing_start();
+                landing_start(/* at_show_landing_target = */ true);
                 break;
             default:
                 // This should not happen but let's be defensive. Safest is to
                 // land in place, and it is consistent with legacy behaviour
                 gcs().send_text(MAV_SEVERITY_WARNING, "Invalid post-show action, landing in place");
-                landing_start();
+                landing_start(/* at_show_landing_target = */ true);
                 break;
         }
     }
@@ -816,22 +816,132 @@ bool ModeDroneShow::performing_completed() const
     return copter.g2.drone_show_manager.is_performance_completed();
 }
 
-// starts the phase where we are landing at the place where we are, used at
-// the end of a show
-void ModeDroneShow::landing_start()
+// Never anchor the landing to a target farther than this from the current
+// position; a larger distance indicates a mismatch between the trajectory and
+// the actual flight, and the safest course of action is to land in place.
+static constexpr float LANDING_TARGET_SANITY_DISTANCE_CM = 500.0f;
+
+// starts the landing phase. When at_show_landing_target is set (used at the
+// end of a show), the landing is anchored to the intended landing position of
+// the show trajectory instead of the incidental stopping point of the
+// position controller; otherwise we land at the place where we are (used by
+// the failsafe-style call sites).
+void ModeDroneShow::landing_start(bool at_show_landing_target)
 {
+    AC_DroneShowManager* show_manager = &copter.g2.drone_show_manager;
+
     _set_stage(DroneShow_Landing);
 
-    // TODO(ntamas): set stopping point of loiter nav properly so we land as
-    // close to our destination as possible
+    _landing_target_valid = false;
+    _landing_descent_started = false;
+
+    if (at_show_landing_target) {
+        Vector3f target;
+        if (show_manager->get_landing_position_NEU_cm(target)) {
+            const Vector3f& position = inertial_nav.get_position_neu_cm();
+            float distance_cm = Vector2f(target.x - position.x, target.y - position.y).length();
+            if (distance_cm <= LANDING_TARGET_SANITY_DISTANCE_CM) {
+                _landing_target_neu_cm = target;
+                _landing_target_valid = true;
+            } else {
+                gcs().send_text(
+                    MAV_SEVERITY_WARNING, "Landing target %.1fm away, landing in place",
+                    distance_cm * 0.01f
+                );
+            }
+        }
+    }
+
+    if (
+        _landing_target_valid && show_manager->get_landing_max_xy_error_m() > 0 &&
+        !copter.ap.land_complete
+    ) {
+        // Hold position above the intended landing position in guided mode
+        // until the horizontal error drops below the limit; the descent is
+        // started from landing_run(). If the land detector has already
+        // declared a landing, holding is pointless (guided ground-handles
+        // while landed), so we skip straight to the descent in that case.
+        Vector3f hold_target = _landing_target_neu_cm;
+
+        // Hold at the current altitude, but never below 1 m above the
+        // intended landing point: show trajectories usually end at ground
+        // level, and repositioning must happen with ground clearance
+        hold_target.z = MAX(
+            inertial_nav.get_position_z_up_cm(),
+            _landing_target_neu_cm.z + 100.0f
+        );
+
+        copter.mode_guided.init(true);
+        if (!copter.mode_guided.set_destination(hold_target)) {
+            // The hold target was rejected, which can only mean it violates
+            // the fence. Do not anchor the descent to a point we are not
+            // allowed to reach -- land in place instead.
+            _landing_target_valid = false;
+            landing_start_descent();
+        }
+    } else {
+        landing_start_descent();
+    }
+}
+
+// starts the actual descent of the landing phase
+void ModeDroneShow::landing_start_descent()
+{
+    _landing_descent_started = true;
 
     // call regular land flight mode initialisation and ask it to ignore checks
     copter.mode_land.init(/* ignore_checks = */ true);
+
+    if (_landing_target_valid) {
+        // Anchor the descent to the intended landing position instead of the
+        // stopping point inherited from the previous controller state so we
+        // land as close to our destination as possible
+        pos_control->set_pos_desired_xy_cm(
+            Vector2f(_landing_target_neu_cm.x, _landing_target_neu_cm.y)
+        );
+    }
 }
 
 // performs the landing stage
 void ModeDroneShow::landing_run()
 {
+    if (!_landing_descent_started) {
+        // we are holding position above the intended landing position until
+        // the horizontal error drops below the limit or we time out
+        AC_DroneShowManager* show_manager = &copter.g2.drone_show_manager;
+
+        if (copter.ap.land_complete) {
+            // the land detector declared a landing while we were holding
+            // (e.g. the drone settled on the pad); guided cannot climb out
+            // of a latched landing, so finish the landing instead of idling
+            // until the timeout
+            landing_start_descent();
+            return;
+        }
+
+        copter.mode_guided.run();
+
+        const Vector3f& position = inertial_nav.get_position_neu_cm();
+        float error_cm = Vector2f(
+            _landing_target_neu_cm.x - position.x,
+            _landing_target_neu_cm.y - position.y
+        ).length();
+        float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
+        float max_wait_msec = show_manager->get_landing_max_wait_sec() * 1000.0f;
+
+        if (error_cm <= max_error_cm) {
+            landing_start_descent();
+        } else if (get_elapsed_time_since_last_stage_change_msec() >= max_wait_msec) {
+            gcs().send_text(
+                MAV_SEVERITY_WARNING, "Landing with %.2fm XY error after timeout",
+                error_cm * 0.01f
+            );
+            landing_start_descent();
+        }
+
+        return;
+    }
+
     // call regular land flight mode run function
     copter.mode_land.run();
 

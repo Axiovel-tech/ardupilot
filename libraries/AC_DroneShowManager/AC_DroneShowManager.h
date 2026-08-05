@@ -209,6 +209,25 @@ public:
     // system, using centimeters as units.
     bool get_desired_global_position_at_seconds(float time, Location& loc) WARN_IF_UNUSED;
 
+    // Returns the position where the show trajectory intends the drone to
+    // land, in NEU centimeters relative to the EKF origin. This is the
+    // trajectory evaluated at its end, so it already includes the adjustment
+    // made for circular trajectories when the corresponding show option is
+    // enabled. Used to anchor the post-show landing to the intended landing
+    // point instead of the incidental stopping point of the position
+    // controller.
+    bool get_landing_position_NEU_cm(Vector3f& pos) WARN_IF_UNUSED;
+
+    // Returns the maximum allowed horizontal distance from the intended
+    // landing position before the post-show landing may start descending,
+    // in meters. Zero or negative disables the gate.
+    float get_landing_max_xy_error_m() const { return _params.landing_max_xy_error_m; }
+
+    // Returns the maximum time the drone may spend holding position above
+    // the intended landing position waiting for the XY error to drop below
+    // the limit, in seconds, before descending anyway.
+    float get_landing_max_wait_sec() const { return _params.landing_max_wait_sec; }
+
     // Returns the desired velocity of the drone during the drone show the
     // given number of seconds after the start time, in the global NEU
     // cooordinate system, using centimeters per seconds as units.
@@ -660,6 +679,16 @@ private:
 
         // Takeoff altitude
         AP_Float takeoff_altitude_m;
+
+        // Maximum allowed horizontal distance from the intended landing
+        // position before the post-show landing may start descending, in
+        // meters; zero or negative disables the gate
+        AP_Float landing_max_xy_error_m;
+
+        // Maximum time to spend holding position above the intended landing
+        // position waiting for the XY error to drop below the limit, in
+        // seconds
+        AP_Float landing_max_wait_sec;
 
         // Time synchronization mode
         AP_Int8 time_sync_mode;

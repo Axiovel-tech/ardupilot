@@ -384,7 +384,25 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MAX_ESC_ERR", 39, AC_DroneShowManager, _params.max_esc_error_rate_pcnt, DEFAULT_MAX_ESC_ERROR_RATE_PCNT),
 
-    // Currently used max parameter ID: 40; update this if you add more parameters.
+    // @Param: LAND_XY_ERR
+    // @DisplayName: Maximum XY error to start the post-show descent
+    // @Description: Maximum allowed horizontal distance between the estimated position of the drone and the intended landing position of the show trajectory before the post-show landing is allowed to start descending. While the error is larger, the drone holds position above the intended landing position. Zero disables the gate and the drone starts descending immediately, wherever it is. Useful when the drone must land accurately, e.g. on a docking or charging pad.
+    // @Range: 0 2
+    // @Increment: 0.05
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("LAND_XY_ERR", 46, AC_DroneShowManager, _params.landing_max_xy_error_m, 0.0f),
+
+    // @Param: LAND_WAIT
+    // @DisplayName: Maximum time to wait before the post-show descent
+    // @Description: Maximum time the drone may spend holding position above the intended landing position, waiting for the horizontal error to drop below SHOW_LAND_XY_ERR, before it starts descending anyway. Only used when SHOW_LAND_XY_ERR is positive.
+    // @Range: 0 60
+    // @Increment: 1
+    // @Units: s
+    // @User: Advanced
+    AP_GROUPINFO("LAND_WAIT", 47, AC_DroneShowManager, _params.landing_max_wait_sec, 10.0f),
+
+    // Currently used max parameter ID: 47; update this if you add more parameters.
     // Note that the max parameter ID may appear in the middle of the above list.
 
     AP_GROUPEND
