@@ -840,14 +840,23 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
         if (show_manager->get_landing_position_NEU_cm(target)) {
             const Vector3f& position = inertial_nav.get_position_neu_cm();
             float distance_cm = Vector2f(target.x - position.x, target.y - position.y).length();
-            if (distance_cm <= LANDING_TARGET_SANITY_DISTANCE_CM) {
-                _landing_target_neu_cm = target;
-                _landing_target_valid = true;
-            } else {
+            if (distance_cm > LANDING_TARGET_SANITY_DISTANCE_CM) {
                 gcs().send_text(
                     MAV_SEVERITY_WARNING, "Landing target %.1fm away, landing in place",
                     distance_cm * 0.01f
                 );
+#if AP_FENCE_ENABLED
+            } else if (!copter.fence.check_destination_within_fence(
+                Location(target, Location::AltFrame::ABOVE_ORIGIN)
+            )) {
+                // never anchor the descent to a point outside the fence; this
+                // covers the ungated path too, where no guided-mode fence
+                // check would otherwise run
+                gcs().send_text(MAV_SEVERITY_WARNING, "Landing target outside fence, landing in place");
+#endif
+            } else {
+                _landing_target_neu_cm = target;
+                _landing_target_valid = true;
             }
         }
     }
@@ -870,6 +879,7 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
             inertial_nav.get_position_z_up_cm(),
             _landing_target_neu_cm.z + 100.0f
         );
+        _landing_hold_z_cm = hold_target.z;
 
         copter.mode_guided.init(true);
         if (!copter.mode_guided.set_destination(hold_target)) {
@@ -929,7 +939,14 @@ void ModeDroneShow::landing_run()
         float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
         float max_wait_msec = show_manager->get_landing_max_wait_sec() * 1000.0f;
 
-        if (error_cm <= max_error_cm) {
+        // The descent may start only when the XY error has converged AND the
+        // hold altitude has been reached; otherwise a vehicle that starts the
+        // hold at pad height would do its lateral correction while skimming
+        // the ground, defeating the ground-clearance protection
+        bool xy_converged = error_cm <= max_error_cm;
+        bool hold_altitude_reached = position.z >= _landing_hold_z_cm - 30.0f;
+
+        if (xy_converged && hold_altitude_reached) {
             landing_start_descent();
         } else if (get_elapsed_time_since_last_stage_change_msec() >= max_wait_msec) {
             gcs().send_text(

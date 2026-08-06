@@ -118,6 +118,10 @@ private:
     // Stores whether _landing_target_neu_cm holds a valid landing target
     bool _landing_target_valid;
 
+    // Altitude of the pre-descent hold above the EKF origin, in NEU cm; the
+    // gated descent may only start once this altitude has been reached
+    float _landing_hold_z_cm;
+
     // Stores whether the landing stage has started the actual descent. When
     // the XY error gate is enabled, the landing stage first holds position
     // above the intended landing position and starts the descent only when
