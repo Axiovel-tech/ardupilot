@@ -854,12 +854,16 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
                     distance_cm * 0.01f
                 );
 #if AP_FENCE_ENABLED
-            } else if (!copter.fence.check_destination_within_fence(
+            } else if (!copter.fence.check_horizontal_destination_within_fence(
                 Location(target, Location::AltFrame::ABOVE_ORIGIN)
             )) {
                 // never anchor the descent to a point outside the fence; this
                 // covers the ungated path too, where no guided-mode fence
-                // check would otherwise run
+                // check would otherwise run. Only the horizontal fences are
+                // relevant: the anchor's altitude is never commanded (LAND
+                // uses only its XY), and the floor fence -- which a ground
+                // level trajectory endpoint would always violate -- is
+                // auto-disabled while landing anyway
                 gcs().send_text(MAV_SEVERITY_WARNING, "Landing target outside fence, landing in place");
 #endif
             } else {
