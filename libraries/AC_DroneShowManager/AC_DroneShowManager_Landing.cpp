@@ -1,5 +1,3 @@
-#include <skybrush/skybrush.h>
-
 #include "AC_DroneShowManager.h"
 #include "DroneShow_Constants.h"
 
