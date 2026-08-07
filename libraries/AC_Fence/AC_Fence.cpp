@@ -835,6 +835,11 @@ bool AC_Fence::check_destination_within_fence(const Location& loc)
         }
     }
 
+    return check_horizontal_destination_within_fence(loc);
+}
+
+bool AC_Fence::check_horizontal_destination_within_fence(const Location& loc)
+{
     // Circular fence check
     if ((get_enabled_fences() & AC_FENCE_TYPE_CIRCLE)) {
         if (AP::ahrs().get_home().get_distance(loc) > _circle_radius) {
@@ -978,6 +983,7 @@ bool AC_Fence::pre_arm_check(char *failure_msg, const uint8_t failure_msg_len) c
 
 uint8_t AC_Fence::check(bool disable_auto_fences) { return 0; }
 bool AC_Fence::check_destination_within_fence(const Location& loc) { return true; }
+bool AC_Fence::check_horizontal_destination_within_fence(const Location& loc) { return true; }
 float AC_Fence::get_breach_distance(uint8_t fence_type) const { return 0.0; }
 void AC_Fence::get_fence_names(uint8_t fences, ExpandingString& msg) { }
 void AC_Fence::print_fence_message(const char* msg, uint8_t fences) const {}
