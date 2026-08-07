@@ -883,7 +883,11 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
             _landing_target_neu_cm.y - position.y
         ).length();
         float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
-        float clearance_cm = position.z - _landing_target_neu_cm.z;
+        // Height above the EKF origin approximates height above the ground:
+        // show drones initialise the EKF on the ground and show areas are
+        // flat. Deliberately not relative to the trajectory endpoint, whose
+        // altitude may be well above the pad (shows ending with clearance).
+        float clearance_cm = position.z;
 
         if (error_cm <= max_error_cm) {
             // Already within the margin: descend right away, anchored to the
