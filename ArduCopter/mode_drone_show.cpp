@@ -821,6 +821,14 @@ bool ModeDroneShow::performing_completed() const
 // the actual flight, and the safest course of action is to land in place.
 static constexpr float LANDING_TARGET_SANITY_DISTANCE_CM = 500.0f;
 
+// Repositioning during the descent gate must happen with ground clearance.
+// If the drone is closer than this to the intended landing altitude while
+// outside the XY margin when the landing starts, we land in place instead of
+// climbing: a climb commanded at or just after ground contact is a
+// touch-and-go hazard around docking hardware. Deliberate retry-after-miss
+// can be added later as an explicit, separately tested policy.
+static constexpr float LANDING_GATE_MIN_CLEARANCE_CM = 70.0f;
+
 // starts the landing phase. When at_show_landing_target is set (used at the
 // end of a show), the landing is anchored to the intended landing position of
 // the show trajectory instead of the incidental stopping point of the
@@ -865,29 +873,53 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
         _landing_target_valid && show_manager->get_landing_max_xy_error_m() > 0 &&
         !copter.ap.land_complete
     ) {
-        // Hold position above the intended landing position in guided mode
-        // until the horizontal error drops below the limit; the descent is
-        // started from landing_run(). If the land detector has already
-        // declared a landing, holding is pointless (guided ground-handles
-        // while landed), so we skip straight to the descent in that case.
-        Vector3f hold_target = _landing_target_neu_cm;
+        const Vector3f& position = inertial_nav.get_position_neu_cm();
+        float error_cm = Vector2f(
+            _landing_target_neu_cm.x - position.x,
+            _landing_target_neu_cm.y - position.y
+        ).length();
+        float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
+        float clearance_cm = position.z - _landing_target_neu_cm.z;
 
-        // Hold at the current altitude, but never below 1 m above the
-        // intended landing point: show trajectories usually end at ground
-        // level, and repositioning must happen with ground clearance
-        hold_target.z = MAX(
-            inertial_nav.get_position_z_up_cm(),
-            _landing_target_neu_cm.z + 100.0f
-        );
-        _landing_hold_z_cm = hold_target.z;
-
-        copter.mode_guided.init(true);
-        if (!copter.mode_guided.set_destination(hold_target)) {
-            // The hold target was rejected, which can only mean it violates
-            // the fence. Do not anchor the descent to a point we are not
-            // allowed to reach -- land in place instead.
+        if (error_cm <= max_error_cm) {
+            // Already within the margin: descend right away, anchored to the
+            // intended landing position. Holding first would climb ground-
+            // ending trajectories at least a metre for nothing.
+            landing_start_descent();
+        } else if (clearance_cm < LANDING_GATE_MIN_CLEARANCE_CM) {
+            // Outside the margin but too close to the ground to reposition
+            // safely: never climb from (near) ground contact. Land in place
+            // without the anchor so the descent does not drag the vehicle
+            // laterally along the ground towards the target.
+            gcs().send_text(
+                MAV_SEVERITY_WARNING, "Landing %.2fm off target, landing in place",
+                error_cm * 0.01f
+            );
             _landing_target_valid = false;
             landing_start_descent();
+        } else {
+            // Hold position above the intended landing position in guided
+            // mode until the horizontal error drops below the limit; the
+            // descent is started from landing_run(). If the land detector
+            // has already declared a landing, holding is pointless (guided
+            // ground-handles while landed), so we skip straight to the
+            // descent in that case.
+            Vector3f hold_target = _landing_target_neu_cm;
+
+            // Hold at the current altitude, but never below 1 m above the
+            // intended landing point so that the repositioning happens with
+            // ground clearance
+            hold_target.z = MAX(position.z, _landing_target_neu_cm.z + 100.0f);
+            _landing_hold_z_cm = hold_target.z;
+
+            copter.mode_guided.init(true);
+            if (!copter.mode_guided.set_destination(hold_target)) {
+                // The hold target was rejected, which can only mean it
+                // violates the fence. Do not anchor the descent to a point
+                // we are not allowed to reach -- land in place instead.
+                _landing_target_valid = false;
+                landing_start_descent();
+            }
         }
     } else {
         landing_start_descent();
@@ -940,9 +972,8 @@ void ModeDroneShow::landing_run()
         float max_wait_msec = show_manager->get_landing_max_wait_sec() * 1000.0f;
 
         // The descent may start only when the XY error has converged AND the
-        // hold altitude has been reached; otherwise a vehicle that starts the
-        // hold at pad height would do its lateral correction while skimming
-        // the ground, defeating the ground-clearance protection
+        // hold altitude has been reached, so that the lateral correction
+        // finishes with proper ground clearance before the descent begins
         bool xy_converged = error_cm <= max_error_cm;
         bool hold_altitude_reached = position.z >= _landing_hold_z_cm - 30.0f;
 
