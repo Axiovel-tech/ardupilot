@@ -883,11 +883,18 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
             _landing_target_neu_cm.y - position.y
         ).length();
         float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
-        // Height above the EKF origin approximates height above the ground:
-        // show drones initialise the EKF on the ground and show areas are
-        // flat. Deliberately not relative to the trajectory endpoint, whose
-        // altitude may be well above the pad (shows ending with clearance).
-        float clearance_cm = position.z;
+        // Ground clearance is measured above home -- set at arming on this
+        // drone's own pad -- matching the other altitude gates in this mode
+        // (takeoff_completed(), the pyro gate). The EKF origin is not a
+        // ground datum: it may be provisioned venue-wide and sit well above
+        // or below this drone's pad. Not relative to the trajectory endpoint
+        // either, whose altitude may be well above the pad (shows ending
+        // with clearance). If the altitude cannot be resolved, stay on the
+        // conservative side and treat the clearance as zero (never climb).
+        int32_t clearance_cm = 0;
+        if (!copter.current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, clearance_cm)) {
+            clearance_cm = 0;
+        }
 
         if (error_cm <= max_error_cm) {
             // Already within the margin: descend right away, anchored to the
