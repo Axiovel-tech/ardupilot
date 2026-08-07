@@ -391,7 +391,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 0.05
     // @Units: m
     // @User: Advanced
-    AP_GROUPINFO("LAND_XY_ERR", 46, AC_DroneShowManager, _params.landing_max_xy_error_m, 0.0f),
+    AP_GROUPINFO("LAND_XY_ERR", 62, AC_DroneShowManager, _params.landing_max_xy_error_m, 0.0f),
 
     // @Param: LAND_WAIT
     // @DisplayName: Maximum time to wait before the post-show descent
@@ -400,9 +400,11 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 1
     // @Units: s
     // @User: Advanced
-    AP_GROUPINFO("LAND_WAIT", 47, AC_DroneShowManager, _params.landing_max_wait_sec, 10.0f),
+    AP_GROUPINFO("LAND_WAIT", 63, AC_DroneShowManager, _params.landing_max_wait_sec, 10.0f),
 
-    // Currently used max parameter ID: 47; update this if you add more parameters.
+    // Currently used max parameter ID: 63 (LAND_XY_ERR/LAND_WAIT sit at the top
+    // of the 6-bit index range on purpose: they are fork-local, and the vendor
+    // grows this table sequentially -- IDs 48+ stay free for upstream merges).
     // Note that the max parameter ID may appear in the middle of the above list.
 
     AP_GROUPEND
