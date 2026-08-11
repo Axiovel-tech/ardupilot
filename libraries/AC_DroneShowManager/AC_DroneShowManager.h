@@ -561,7 +561,7 @@ public:
     AC_BubbleFence bubble_fence;
 
     // Landing speed; we assume that the drone should attempt to land with this
-    // vertical speed if LAND_SPEED seems invalid
+    // vertical speed if LAND_SPD_MS seems invalid
     static constexpr float DEFAULT_LANDING_SPEED_METERS_PER_SEC = 1.0f;
 
     // Takeoff acceleration; we assume that the drone attempts to take off with

@@ -17,6 +17,38 @@ import sys
 FIRMWARE_TYPES = ["AntennaTracker", "Copter", "Plane", "Rover", "Sub", "AP_Periph", "Blimp"]
 RELEASE_TYPES = ["beta", "latest", "stable", "stable-*", "dirty"]
 
+# AXIOLIGHT_REVB uses a fielded board ID which this fork cannot change.  The
+# upstream CrazyF405 target has the same ID, so it must never be published by
+# an Axiovel firmware manifest, including from stale build directories.
+BLOCKED_MANIFEST_PLATFORMS = frozenset(["CrazyF405"])
+PROTECTED_BOARD_IDS = {1177: "AXIOLIGHT-REVB"}
+PROTECTED_BOARD_PLATFORMS = {platform: board_id for board_id, platform in PROTECTED_BOARD_IDS.items()}
+
+
+def validate_firmware_board_identity(firmware):
+    '''fail closed if protected board identities could be ambiguous'''
+    platform = firmware.get("platform")
+    if platform in BLOCKED_MANIFEST_PLATFORMS:
+        raise ValueError("Refusing to publish blocked platform %s" % platform)
+
+    board_id = firmware.get("board_id")
+    if board_id is None:
+        if (platform in PROTECTED_BOARD_PLATFORMS and
+                firmware.get("format") == "apj"):
+            raise ValueError("Platform %s APJ is missing its protected board ID" % platform)
+        return
+
+    expected_platform = PROTECTED_BOARD_IDS.get(board_id)
+    if expected_platform is not None and platform != expected_platform:
+        raise ValueError("Board ID %s is reserved for platform %s, not %s" %
+                         (board_id, expected_platform, platform))
+
+    expected_board_id = PROTECTED_BOARD_PLATFORMS.get(platform)
+    if expected_board_id is not None and board_id != expected_board_id:
+        raise ValueError("Platform %s must use board ID %s, not %s" %
+                         (platform, expected_board_id, board_id))
+
+
 # mapping for board names to brand name and manufacturer
 brand_map = {
     'Pixhawk4' : ('Pixhawk 4', 'Holybro'),
@@ -561,6 +593,7 @@ class ManifestGenerator():
                 some_json["mav-firmware-version-patch"] = patch
 
             self.add_USB_IDs(some_json)
+            validate_firmware_board_identity(some_json)
 
             firmware_json.append(some_json)
 

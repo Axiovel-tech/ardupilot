@@ -66,13 +66,26 @@ class ValidateBoardList(object):
             20, # TARGET_HW_UVIFY_CORE and AP_HW_F4BY
         ])
 
+        # board IDs which may map only to the exact names listed.  The
+        # AXIOLIGHT_REVB ID is fielded and cannot be changed, while CrazyF405
+        # is deliberately excluded from this fork's release builds.
+        board_id_name_whitelist = {
+            1177: frozenset([
+                "AP_HW_CrazyF405",
+                "AP_HW_AXIOLIGHT_REVB",
+            ]),
+        }
+
         dict_by_id = {}
         dict_by_name = {}
         for (board_id, name) in tuples:
             print("Checking (%u, %s)" % (board_id, name))
-            if board_id in dict_by_id and board_id not in board_id_whitelist:
-                raise ValueError("Duplicate ID %s in file for (%s) and (%s)" %
-                                 (board_id, dict_by_id[board_id], name))
+            if board_id in dict_by_id:
+                duplicate_names = frozenset([dict_by_id[board_id], name])
+                exact_names = board_id_name_whitelist.get(board_id)
+                if board_id not in board_id_whitelist and duplicate_names != exact_names:
+                    raise ValueError("Duplicate ID %s in file for (%s) and (%s)" %
+                                     (board_id, dict_by_id[board_id], name))
             if name in dict_by_name:
                 raise ValueError("Duplicate name %s in file for (%s) and (%s)" %
                                  (name, dict_by_name[name], board_id))
