@@ -4559,7 +4559,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                         math.isclose(msg.PEN, 0.01, abs_tol=1e-6) and
                         math.isclose(msg.PEE, 0.01, abs_tol=1e-6) and
                         math.isclose(msg.PED, 0.01, abs_tol=1e-6)):
-                        fallback_samples += 1
+                    fallback_samples += 1
                 continue
             # AP_Vector3f components are set as three MAVLink parameters, so
             # Vicon can emit a few partial covariance samples while X/Y/Z are
