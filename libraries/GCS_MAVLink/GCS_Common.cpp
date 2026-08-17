@@ -4146,6 +4146,7 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
         return;
     }
 
+    const AP_VisualOdom::PositionCovariance pos_covariance = get_position_covariance(m.covariance);
     float posErr = 0;
     float angErr = 0;
     if (!isnan(m.covariance[0])) {
@@ -4154,7 +4155,7 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
     }
 
     // note: att_pos_mocap does not include reset counter
-    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, posErr, angErr, 0, 0);
+    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, posErr, angErr, 0, 0, &pos_covariance);
 }
 
 void GCS_MAVLINK::handle_vision_speed_estimate(const mavlink_message_t &msg)
