@@ -4549,6 +4549,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         mlog = self.dfreader_for_current_onboard_log()
         fallback_samples = 0
         covariance_samples = 0
+        covariance_active = False
         while True:
             msg = mlog.recv_match(type="VISC")
             if msg is None:
@@ -4558,8 +4559,20 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                         math.isclose(msg.PEN, 0.01, abs_tol=1e-6) and
                         math.isclose(msg.PEE, 0.01, abs_tol=1e-6) and
                         math.isclose(msg.PED, 0.01, abs_tol=1e-6)):
-                    fallback_samples += 1
+                        fallback_samples += 1
                 continue
+            # AP_Vector3f components are set as three MAVLink parameters, so
+            # Vicon can emit a few partial covariance samples while X/Y/Z are
+            # being updated.  Start strict validation at the first complete
+            # matrix; every subsequent sample must remain exact.
+            if not covariance_active:
+                covariance_active = all(
+                    math.isclose(getattr(msg, field), value,
+                                 rel_tol=1e-5, abs_tol=1e-6)
+                    for field, value in expected.items()
+                )
+                if not covariance_active:
+                    continue
             covariance_samples += 1
             for field, value in expected.items():
                 if not math.isclose(getattr(msg, field), value, rel_tol=1e-5, abs_tol=1e-6):
