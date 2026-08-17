@@ -25,6 +25,10 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, axio-sitl]
     timeout-minutes: 180
+    env:
+      # Container jobs use /github/home rather than the runner account's home.
+      # An explicit location lets actions/cache and pip agree on the same path.
+      PIP_CACHE_DIR: /github/home/.cache/pip
     container:
       image: ardupilot/ardupilot-dev-base:v0.1.3
       options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
@@ -37,7 +41,7 @@ jobs:
       - name: Cache Python packages
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
+          path: ${{ env.PIP_CACHE_DIR }}
           key: ${{ runner.os }}-${{ runner.arch }}-pip-ardupilot-dev-base-v0.1.3-${{ hashFiles('.github/workflows/axiovel-sitl-requirements.txt', 'modules/mavlink/pymavlink/requirements.txt', 'modules/mavlink/pymavlink/setup.py') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-pip-ardupilot-dev-base-v0.1.3-
@@ -46,6 +50,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$PIP_CACHE_DIR"
+          python3 -m pip cache dir
           python3 -m pip install --user --progress-bar off \
             --requirement .github/workflows/axiovel-sitl-requirements.txt
           # Use the pymavlink revision pinned by this ArduPilot checkout so the
