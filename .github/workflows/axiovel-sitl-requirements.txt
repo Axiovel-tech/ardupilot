@@ -1,11 +1,11 @@
 # Python tooling used by Tools/autotest. Keep this list aligned with
 # Tools/environment_install/install-prereqs-ubuntu.sh.
-future
-lxml
-pyserial
+future==0.18.3
+lxml==4.9.3
+pyserial==3.5
 MAVProxy==1.8.67
-pexpect
-geocoder
+pexpect==4.9.0
+geocoder==1.38.1
 empy==3.3.4
-ptyprocess
-dronecan
+ptyprocess==0.7.0
+dronecan==1.0.27
