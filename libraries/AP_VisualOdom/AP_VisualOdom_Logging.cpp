@@ -24,11 +24,15 @@ void AP_VisualOdom_Backend::Write_VisualOdom(float time_delta, const Vector3f &a
 }
 
 // Write visual position sensor data.  x,y,z are in meters, angles are in degrees
-void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float pos_err, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality)
+void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, const ExtNavPositionError &pos_err, const AP_VisualOdom::PositionCovariance *pos_covariance, bool covariance_used, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality)
 {
+    const AP_VisualOdom::PositionCovariance empty_covariance {};
+    const AP_VisualOdom::PositionCovariance &covariance =
+        pos_covariance != nullptr ? *pos_covariance : empty_covariance;
+    const uint64_t time_us = AP_HAL::micros64();
     const struct log_VisualPosition pkt_visualpos {
         LOG_PACKET_HEADER_INIT(LOG_VISUALPOS_MSG),
-        time_us         : AP_HAL::micros64(),
+        time_us         : time_us,
         remote_time_us  : remote_time_us,
         time_ms         : time_ms,
         pos_x           : x,
@@ -37,13 +41,32 @@ void AP_VisualOdom_Backend::Write_VisualPosition(uint64_t remote_time_us, uint32
         roll            : roll,
         pitch           : pitch,
         yaw             : yaw,
-        pos_err         : pos_err,
+        pos_err         : pos_err.scalar,
+        pos_err_z       : pos_err.axis.z,
         ang_err         : ang_err,
         reset_counter   : reset_counter,
         ignored         : (uint8_t)ignored,
         quality         : quality
     };
     AP::logger().WriteBlock(&pkt_visualpos, sizeof(log_VisualPosition));
+
+    const struct log_VisualPositionCovariance pkt_visualcov {
+        LOG_PACKET_HEADER_INIT(LOG_VISUALCOV_MSG),
+        time_us         : time_us,
+        remote_time_us  : remote_time_us,
+        pos_err_legacy  : pos_err.scalar,
+        pos_err_n       : pos_err.axis.x,
+        pos_err_e       : pos_err.axis.y,
+        pos_err_d       : pos_err.axis.z,
+        covariance_xx   : covariance.xx,
+        covariance_xy   : covariance.xy,
+        covariance_xz   : covariance.xz,
+        covariance_yy   : covariance.yy,
+        covariance_yz   : covariance.yz,
+        covariance_zz   : covariance.zz,
+        covariance_used : (uint8_t)covariance_used
+    };
+    AP::logger().WriteBlock(&pkt_visualcov, sizeof(log_VisualPositionCovariance));
 }
 
 // Write visual velocity sensor data, velocity in NED meters per second

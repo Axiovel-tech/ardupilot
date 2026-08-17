@@ -527,6 +527,7 @@ public:
     AP_Int16 vicon_yaw_error;   // vicon yaw error in degrees (added to reported yaw sent to vehicle)
     AP_Int8 vicon_type_mask;    // vicon message type mask (bit0:vision position estimate, bit1:vision speed estimate, bit2:vicon position estimate)
     AP_Vector3f vicon_vel_glitch;   // velocity glitch in m/s in vicon's local frame
+    AP_Vector3f vicon_pos_stddev;   // per-axis gaussian position noise 1-sigma (m) in vicon's local frame
 
     // get the rangefinder reading for the desired instance, returns -1 for no data
     float get_rangefinder(uint8_t instance);

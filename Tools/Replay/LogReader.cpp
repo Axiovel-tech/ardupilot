@@ -59,6 +59,27 @@ bool LogReader::handle_log_format_msg(const struct log_Format &f)
         return true;
     }
 
+    // Replay copies replay (R*) records straight into the compiled-in struct via
+    // memcpy of sizeof(struct), ignoring the FMT recorded in the log.  If the log
+    // was written by firmware whose struct differed, every field past the point of
+    // divergence is silently reinterpreted and the run completes without warning.
+    // Refuse rather than produce plausible-looking nonsense.
+    if (name[0] == 'R') {
+        for (uint8_t i = 0; i < _log_structure_count; i++) {
+            if (strncmp(_log_structure[i].name, name, 4) != 0) {
+                continue;
+            }
+            if (_log_structure[i].msg_len != f.length) {
+                ::printf("Replay: %s is %u bytes in this log but %u in this build - "
+                         "the log was written by incompatible firmware, refusing to "
+                         "replay it\n",
+                         name, (unsigned)f.length, (unsigned)_log_structure[i].msg_len);
+                return false;
+            }
+            break;
+        }
+    }
+
     // map from format name to a parser subclass:
 	if (streq(name, "PARM")) {
         msgparser[f.type] = NEW_NOTHROW LR_MsgHandler_PARM(formats[f.type]);

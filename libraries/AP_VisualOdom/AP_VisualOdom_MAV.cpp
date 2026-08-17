@@ -25,12 +25,34 @@
 
 // consume vision pose estimate data and send to EKF. distances in meters
 // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality)
+void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const AP_VisualOdom::PositionCovariance *pos_covariance)
 {
     const float scale_factor =  _frontend.get_pos_scale();
     Vector3f pos{x * scale_factor, y * scale_factor, z * scale_factor};
 
-    posErr = constrain_float(posErr, _frontend.get_pos_noise(), 100.0f);
+    ExtNavPositionError pos_error;
+    const float sensor_pos_err = posErr;
+    pos_error.scalar = constrain_float(sensor_pos_err, _frontend.get_pos_noise(), 100.0f);
+    const bool use_position_covariance =
+        pos_covariance != nullptr && pos_covariance->has_valid_diagonal();
+
+    if (use_position_covariance) {
+        // MAVLink supplies variances in m^2.  Convert each diagonal to its
+        // corresponding 1-sigma error and apply the position scale and
+        // per-axis configured floors.  Cross terms are logged but EKF3's
+        // sequential observation fusion does not consume them.
+        const float error_scale = fabsf(scale_factor);
+        pos_error.axis.x = constrain_float(sqrtf(pos_covariance->xx) * error_scale, _frontend.get_pos_noise(), 100.0f);
+        pos_error.axis.y = constrain_float(sqrtf(pos_covariance->yy) * error_scale, _frontend.get_pos_noise(), 100.0f);
+        pos_error.axis.z = constrain_float(sqrtf(pos_covariance->zz) * error_scale, _frontend.get_alt_noise(), 100.0f);
+    } else {
+        // Scalar-only sources retain the configured vertical:horizontal ratio
+        // behaviour introduced with VISO_ALT_M_NSE.
+        pos_error.axis.x = pos_error.scalar;
+        pos_error.axis.y = pos_error.scalar;
+        pos_error.axis.z = constrain_float(sensor_pos_err * _frontend.get_alt_noise_ratio(),
+                                           _frontend.get_alt_noise(), 100.0f);
+    }
     angErr = constrain_float(angErr, _frontend.get_yaw_noise(), 1.5f);
 
     // record quality
@@ -39,7 +61,7 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
     // send attitude and position to EKF if quality OK
     bool consume = (_quality >= _frontend.get_quality_min());
     if (consume) {
-        AP::ahrs().writeExtNavData(pos, attitude, posErr, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
+        AP::ahrs().writeExtNavData(pos, attitude, pos_error, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
     }
 
     // calculate euler orientation for logging
@@ -50,7 +72,7 @@ void AP_VisualOdom_MAV::handle_pose_estimate(uint64_t remote_time_us, uint32_t t
 
 #if HAL_LOGGING_ENABLED
     // log sensor data
-    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), degrees(yaw), posErr, angErr, reset_counter, !consume, _quality);
+    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), degrees(yaw), pos_error, pos_covariance, use_position_covariance, angErr, reset_counter, !consume, _quality);
 #endif
 
     // record time for health monitoring

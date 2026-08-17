@@ -29,7 +29,7 @@ extern const AP_HAL::HAL& hal;
 
 // consume vision pose estimate data and send to EKF. distances in meters
 // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality)
+void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const AP_VisualOdom::PositionCovariance *pos_covariance)
 {
     const float scale_factor = _frontend.get_pos_scale();
     Vector3f pos{x * scale_factor, y * scale_factor, z * scale_factor};
@@ -57,7 +57,23 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
     // record position for voxl reset jump handling
     record_voxl_position_and_reset_count(pos, reset_counter);
 
-    posErr = constrain_float(posErr, _frontend.get_pos_noise(), 100.0f);
+    // This backend rotates position into the vehicle frame but receives only a
+    // scalar uncertainty through its existing interface.  Retain the scalar
+    // behaviour here; the MAV backend handles per-axis covariance.
+    //
+    // Floor each axis
+    // separately AND scale the vertical by the configured vertical:horizontal
+    // ratio, otherwise the split would silently collapse whenever the sensor
+    // reports an error above both floors - exactly when accuracy is degrading
+    // and the separation matters most.  With _ALT_M_NSE at its zero default the
+    // ratio is 1 and behaviour is unchanged.
+    ExtNavPositionError pos_error;
+    const float sensor_pos_err = posErr;
+    pos_error.scalar = constrain_float(sensor_pos_err, _frontend.get_pos_noise(), 100.0f);
+    pos_error.axis.x = pos_error.scalar;
+    pos_error.axis.y = pos_error.scalar;
+    pos_error.axis.z = constrain_float(sensor_pos_err * _frontend.get_alt_noise_ratio(),
+                                       _frontend.get_alt_noise(), 100.0f);
     angErr = constrain_float(angErr, _frontend.get_yaw_noise(), 1.5f);
 
     // record quality
@@ -67,7 +83,7 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
     bool consume = should_consume_sensor_data(true, reset_counter) && (_quality >= _frontend.get_quality_min());
     if (consume) {
         // send attitude and position to EKF
-        AP::ahrs().writeExtNavData(pos, att, posErr, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
+        AP::ahrs().writeExtNavData(pos, att, pos_error, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
     }
 
     // calculate euler orientation for logging
@@ -78,7 +94,7 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
 
 #if HAL_LOGGING_ENABLED
     // log sensor data
-    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), wrap_360(degrees(yaw)), posErr, angErr, reset_counter, !consume, _quality);
+    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), wrap_360(degrees(yaw)), pos_error, pos_covariance, false, angErr, reset_counter, !consume, _quality);
 #endif
 
     // store corrected attitude for use in pre-arm checks
