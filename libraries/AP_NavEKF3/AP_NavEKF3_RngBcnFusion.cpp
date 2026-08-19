@@ -9,18 +9,22 @@
 void NavEKF3_core::BeaconFusion::InitialiseVariables()
 {
     memset((void *)&dataDelayed, 0, sizeof(dataDelayed));
+    memset((void *)&tdoaDataDelayed, 0, sizeof(tdoaDataDelayed));
     lastPassTime_ms = 0;
     testRatio = 0.0f;
     health = false;
     varInnov = 0.0f;
     innov = 0.0f;
     memset(&lastTime_ms, 0, sizeof(lastTime_ms));
+    memset(&lastTDoATime_ms, 0, sizeof(lastTDoATime_ms));
     dataToFuse = false;
+    tdoaDataToFuse = false;
     vehiclePosNED.zero();
     vehiclePosErr = 1.0f;
     last3DmeasTime_ms = 0;
     goodToAlign = false;
     lastChecked = 0;
+    lastTDoAChecked = 0;
     receiverPos.zero();
     memset(&receiverPosCov, 0, sizeof(receiverPosCov));
     alignmentStarted =  false;
@@ -39,6 +43,7 @@ void NavEKF3_core::BeaconFusion::InitialiseVariables()
     posOffsetMinVar = 0.0f;
     minOffsetStateChangeFilt = 0.0f;
     fuseDataReportIndex = 0;
+    memset(&tdoaFusionReport, 0, sizeof(tdoaFusionReport));
     delete[] fusionReport;
     fusionReport = nullptr;
     numFusionReports = 0;
@@ -87,6 +92,21 @@ void NavEKF3_core::SelectRngBcnFusion()
             // If we aren't able to use the data in the main filter, use a simple 3-state filter to estimate position only
             FuseRngBcnStatic();
             // record that the beacon origin needs to be initialised
+            rngBcn.originEstInit = false;
+        }
+    }
+
+    if (rngBcn.tdoaDataToFuse) {
+        if (PV_AidingMode == AID_ABSOLUTE &&
+            frontend->sources.getPosXYSource() == AP_NavEKF_Source::SourceXY::BEACON &&
+            rngBcn.alignmentCompleted) {
+            if (!rngBcn.originEstInit) {
+                rngBcn.originEstInit = true;
+                rngBcn.posOffsetNED.x = rngBcn.receiverPos.x - stateStruct.position.x;
+                rngBcn.posOffsetNED.y = rngBcn.receiverPos.y - stateStruct.position.y;
+            }
+            FuseTDoABcn();
+        } else {
             rngBcn.originEstInit = false;
         }
     }
@@ -327,6 +347,146 @@ void NavEKF3_core::FuseRngBcn()
             report.testRatio = rngBcn.testRatio;
         }
     }
+}
+
+void NavEKF3_core::FuseTDoABcn()
+{
+    const ftype R_BCN = sq(MAX(rngBcn.tdoaDataDelayed.distance_diff_err, 0.1f));
+
+    rngBcn.health = false;
+
+    if (activeHgtSource == AP_NavEKF_Source::SourceZ::BEACON) {
+        rngBcn.posOffsetNED.z = 0.0f;
+    }
+
+    const Vector3F delta_a = stateStruct.position - rngBcn.tdoaDataDelayed.beacon_pos_a_NED;
+    const Vector3F delta_b = stateStruct.position - rngBcn.tdoaDataDelayed.beacon_pos_b_NED;
+    const ftype range_a = delta_a.length();
+    const ftype range_b = delta_b.length();
+
+    if (range_a <= 0.1f || range_b <= 0.1f) {
+        return;
+    }
+
+    const ftype predicted_diff = range_b - range_a;
+    rngBcn.innov = predicted_diff - rngBcn.tdoaDataDelayed.distance_diff;
+
+    ftype H_BCN[24];
+    memset(H_BCN, 0, sizeof(H_BCN));
+    H_BCN[7] = delta_b.x / range_b - delta_a.x / range_a;
+    H_BCN[8] = delta_b.y / range_b - delta_a.y / range_a;
+    if (activeHgtSource == AP_NavEKF_Source::SourceZ::BEACON) {
+        H_BCN[9] = delta_b.z / range_b - delta_a.z / range_a;
+    }
+
+    rngBcn.varInnov = R_BCN;
+    for (uint8_t i = 7; i <= 9; i++) {
+        for (uint8_t j = 7; j <= 9; j++) {
+            rngBcn.varInnov += H_BCN[i] * P[i][j] * H_BCN[j];
+        }
+    }
+
+    if (rngBcn.varInnov < R_BCN) {
+        CovarianceInit();
+        faultStatus.bad_rngbcn = true;
+        return;
+    }
+
+    const ftype invInnovVar = 1.0f / rngBcn.varInnov;
+    zero_range(&Kfusion[0], 0, 23);
+    for (uint8_t i = 0; i <= stateIndexLim; i++) {
+        Kfusion[i] = (P[i][7] * H_BCN[7] + P[i][8] * H_BCN[8] + P[i][9] * H_BCN[9]) * invInnovVar;
+    }
+
+    if (inhibitDelAngBiasStates) {
+        zero_range(&Kfusion[0], 10, 12);
+    }
+
+    if (!inhibitDelVelBiasStates && !badIMUdata) {
+        for (uint8_t index = 0; index < 3; index++) {
+            if (dvelBiasAxisInhibit[index]) {
+                Kfusion[index + 13] = 0.0f;
+            }
+        }
+    } else {
+        zero_range(&Kfusion[0], 13, 15);
+    }
+
+    if (activeHgtSource != AP_NavEKF_Source::SourceZ::BEACON) {
+        Kfusion[6] = 0.0f;
+        Kfusion[9] = 0.0f;
+    }
+
+    if (inhibitMagStates) {
+        zero_range(&Kfusion[0], 16, 21);
+    }
+
+    if (inhibitWindStates || treatWindStatesAsTruth) {
+        zero_range(&Kfusion[0], 22, 23);
+    }
+
+    rngBcn.testRatio = sq(rngBcn.innov) / (sq(MAX(0.01f * (ftype)frontend->_rngBcnInnovGate, 1.0f)) * rngBcn.varInnov);
+    rngBcn.health = ((rngBcn.testRatio < 1.0f) || badIMUdata);
+
+    if (rngBcn.health) {
+        rngBcn.lastPassTime_ms = imuSampleTime_ms;
+
+        for (unsigned i = 0; i<=stateIndexLim; i++) {
+            for (unsigned j = 0; j<=6; j++) {
+                KH[i][j] = 0.0f;
+            }
+            for (unsigned j = 7; j<=9; j++) {
+                KH[i][j] = Kfusion[i] * H_BCN[j];
+            }
+            for (unsigned j = 10; j<=23; j++) {
+                KH[i][j] = 0.0f;
+            }
+        }
+        for (unsigned j = 0; j<=stateIndexLim; j++) {
+            for (unsigned i = 0; i<=stateIndexLim; i++) {
+                ftype res = 0;
+                res += KH[i][7] * P[7][j];
+                res += KH[i][8] * P[8][j];
+                res += KH[i][9] * P[9][j];
+                KHP[i][j] = res;
+            }
+        }
+
+        bool healthyFusion = true;
+        for (uint8_t i= 0; i<=stateIndexLim; i++) {
+            if (KHP[i][i] > P[i][i]) {
+                healthyFusion = false;
+            }
+        }
+        if (healthyFusion) {
+            for (uint8_t i= 0; i<=stateIndexLim; i++) {
+                for (uint8_t j= 0; j<=stateIndexLim; j++) {
+                    P[i][j] = P[i][j] - KHP[i][j];
+                }
+            }
+
+            ForceSymmetry();
+            ConstrainVariances();
+
+            for (uint8_t j= 0; j<=stateIndexLim; j++) {
+                statesArray[j] = statesArray[j] - Kfusion[j] * rngBcn.innov;
+            }
+
+            faultStatus.bad_rngbcn = false;
+        } else {
+            faultStatus.bad_rngbcn = true;
+        }
+    }
+
+    auto &report = rngBcn.tdoaFusionReport;
+    report.valid = true;
+    report.healthy = rngBcn.health;
+    report.anchor_id_a = rngBcn.tdoaDataDelayed.anchor_id_a;
+    report.anchor_id_b = rngBcn.tdoaDataDelayed.anchor_id_b;
+    report.distance_diff = rngBcn.tdoaDataDelayed.distance_diff;
+    report.innov = rngBcn.innov;
+    report.innovVar = rngBcn.varInnov;
+    report.testRatio = rngBcn.testRatio;
 }
 
 /*

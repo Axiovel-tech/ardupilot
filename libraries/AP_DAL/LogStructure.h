@@ -30,6 +30,7 @@
     LOG_RASI_MSG, \
     LOG_RBCH_MSG, \
     LOG_RBCI_MSG, \
+    LOG_RBTD_MSG, \
     LOG_RVOH_MSG, \
     LOG_RMGH_MSG, \
     LOG_RMGI_MSG, \
@@ -305,6 +306,19 @@ struct log_RBCI {
     uint8_t _end;
 };
 
+// @LoggerMessage: RBTD
+// @Description: Replay Data Beacon TDoA Instance
+struct log_RBTD {
+    uint32_t last_update_ms;
+    float distance_diff;
+    float distance_diff_err;
+    uint8_t anchor_id_a;
+    uint8_t anchor_id_b;
+    uint8_t healthy;
+    uint8_t instance;
+    uint8_t _end;
+};
+
 // @LoggerMessage: RVOH
 // @Description: Replay Data Visual Odometry data
 struct log_RVOH {
@@ -437,6 +451,8 @@ struct log_RBOH {
       "RBCH", "ffffiiiBB", "PX,PY,PZ,AE,OLat,OLng,OAlt,Flags,NumInst", "---------", "---------" },  \
     { LOG_RBCI_MSG, RLOG_SIZE(RBCI),                                   \
       "RBCI", "IffffBB", "LU,PX,PY,PZ,Dist,H,I", "smmmm-#", "?0000--" }, \
+    { LOG_RBTD_MSG, RLOG_SIZE(RBTD),                                   \
+      "RBTD", "IffBBBB", "LU,DD,Err,A,B,H,I", "smm----", "?00----" }, \
     { LOG_RVOH_MSG, RLOG_SIZE(RVOH),                                   \
       "RVOH", "fffIBB", "OX,OY,OZ,Del,H,Ena", "------", "------" }, \
     { LOG_ROFH_MSG, RLOG_SIZE(ROFH),                                   \

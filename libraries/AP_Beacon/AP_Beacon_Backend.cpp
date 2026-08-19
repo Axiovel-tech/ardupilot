@@ -83,6 +83,49 @@ void AP_Beacon_Backend::set_beacon_position(uint8_t beacon_instance, const Vecto
     _frontend.beacon_state[beacon_instance].position = correct_for_orient_yaw(pos);
 }
 
+// set a TDoA range-difference measurement between two beacons
+void AP_Beacon_Backend::set_tdoa_measurement(uint8_t anchor_id_a, uint8_t anchor_id_b, float distance_diff, float distance_diff_err)
+{
+    if (anchor_id_a >= AP_BEACON_MAX_BEACONS ||
+        anchor_id_b >= AP_BEACON_MAX_BEACONS ||
+        anchor_id_a == anchor_id_b ||
+        !isfinite(distance_diff) ||
+        !isfinite(distance_diff_err)) {
+        return;
+    }
+
+    if (anchor_id_b < anchor_id_a) {
+        const uint8_t anchor_id_tmp = anchor_id_a;
+        anchor_id_a = anchor_id_b;
+        anchor_id_b = anchor_id_tmp;
+        distance_diff = -distance_diff;
+    }
+
+    uint8_t instance = _frontend.num_tdoa;
+    for (uint8_t i = 0; i < _frontend.num_tdoa; i++) {
+        const auto &state = _frontend.tdoa_state[i];
+        if (state.anchor_id_a == anchor_id_a && state.anchor_id_b == anchor_id_b) {
+            instance = i;
+            break;
+        }
+    }
+
+    if (instance >= AP_BEACON_MAX_TDOA_MEASUREMENTS) {
+        return;
+    }
+    if (instance >= _frontend.num_tdoa) {
+        _frontend.num_tdoa = instance + 1;
+    }
+
+    auto &state = _frontend.tdoa_state[instance];
+    state.anchor_id_a = anchor_id_a;
+    state.anchor_id_b = anchor_id_b;
+    state.distance_diff = distance_diff;
+    state.distance_diff_err = MAX(distance_diff_err, 0.0f);
+    state.healthy = true;
+    state.update_ms = AP_HAL::millis();
+}
+
 // rotate vector (meters) to correct for beacon system yaw orientation
 Vector3f AP_Beacon_Backend::correct_for_orient_yaw(const Vector3f &vector)
 {

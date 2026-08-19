@@ -906,6 +906,7 @@ void NavEKF3_core::readRngBcnData()
 {
     // check that arrays are large enough
     static_assert(ARRAY_SIZE(rngBcn.lastTime_ms) >= AP_BEACON_MAX_BEACONS, "lastTimeRngBcn_ms should have at least AP_BEACON_MAX_BEACONS elements");
+    static_assert(ARRAY_SIZE(rngBcn.lastTDoATime_ms) >= AP_BEACON_MAX_TDOA_MEASUREMENTS, "lastTDoATime_ms should have at least AP_BEACON_MAX_TDOA_MEASUREMENTS elements");
 
     // get the location of the beacon data
     const AP_DAL_Beacon *beacon = dal.beacon();
@@ -965,6 +966,40 @@ void NavEKF3_core::readRngBcnData()
         }
     }
 
+    const uint8_t numTDoA = MIN(beacon->tdoa_count(), ARRAY_SIZE(rngBcn.lastTDoATime_ms));
+    bool newTDoADataPushed = false;
+    uint8_t numTDoAChecked = 0;
+    uint8_t tdoa_index = rngBcn.lastTDoAChecked;
+    while (!newTDoADataPushed && (numTDoAChecked < numTDoA)) {
+        numTDoAChecked++;
+
+        tdoa_index++;
+        if (tdoa_index >= numTDoA) {
+            tdoa_index = 0;
+        }
+
+        AP_Beacon::TDoAState tdoa {};
+        if (beacon->get_tdoa_data(tdoa_index, tdoa) &&
+            tdoa.healthy &&
+            tdoa.anchor_id_a < rngBcn.N &&
+            tdoa.anchor_id_b < rngBcn.N &&
+            tdoa.update_ms != rngBcn.lastTDoATime_ms[tdoa_index]) {
+            tdoa_bcn_elements tdoaBcnDataNew = {};
+            rngBcn.lastTDoATime_ms[tdoa_index] = tdoa.update_ms;
+            tdoaBcnDataNew.time_ms = tdoa.update_ms - frontend->_rngBcnDelay_ms - localFilterTimeStep_ms/2;
+            tdoaBcnDataNew.distance_diff = tdoa.distance_diff;
+            tdoaBcnDataNew.distance_diff_err = tdoa.distance_diff_err > 0.0f ? tdoa.distance_diff_err : frontend->_rngBcnNoise;
+            tdoaBcnDataNew.beacon_pos_a_NED = beacon->beacon_position(tdoa.anchor_id_a).toftype();
+            tdoaBcnDataNew.beacon_pos_b_NED = beacon->beacon_position(tdoa.anchor_id_b).toftype();
+            tdoaBcnDataNew.anchor_id_a = tdoa.anchor_id_a;
+            tdoaBcnDataNew.anchor_id_b = tdoa.anchor_id_b;
+
+            newTDoADataPushed = true;
+            rngBcn.lastTDoAChecked = tdoa_index;
+            rngBcn.storedTDoA.push(tdoaBcnDataNew);
+        }
+    }
+
     // Check if the beacon system has returned a 3D fix
     Vector3f bp;
     float bperr;
@@ -973,6 +1008,16 @@ void NavEKF3_core::readRngBcnData()
     }
     rngBcn.vehiclePosNED = bp.toftype();
     rngBcn.vehiclePosErr = bperr;
+
+    if ((imuSampleTime_ms - rngBcn.last3DmeasTime_ms < 250) && (rngBcn.vehiclePosErr < 1.0f) && !rngBcn.alignmentCompleted) {
+        rngBcn.receiverPos = rngBcn.vehiclePosNED;
+        memset(&rngBcn.receiverPosCov, 0, sizeof(rngBcn.receiverPosCov));
+        rngBcn.receiverPosCov[0][0] = sq(rngBcn.vehiclePosErr);
+        rngBcn.receiverPosCov[1][1] = sq(rngBcn.vehiclePosErr);
+        rngBcn.receiverPosCov[2][2] = sq(rngBcn.vehiclePosErr);
+        rngBcn.alignmentStarted = true;
+        rngBcn.alignmentCompleted = true;
+    }
 
     // Check if the range beacon data can be used to align the vehicle position
     if ((imuSampleTime_ms - rngBcn.last3DmeasTime_ms < 250) && (rngBcn.vehiclePosErr < 1.0f) && rngBcn.alignmentCompleted) {
@@ -1010,6 +1055,15 @@ void NavEKF3_core::readRngBcnData()
     if (rngBcn.dataToFuse) {
         rngBcn.dataDelayed.beacon_posNED.x += rngBcn.posOffsetNED.x;
         rngBcn.dataDelayed.beacon_posNED.y += rngBcn.posOffsetNED.y;
+    }
+
+    rngBcn.tdoaDataToFuse = rngBcn.storedTDoA.recall(rngBcn.tdoaDataDelayed, imuDataDelayed.time_ms);
+
+    if (rngBcn.tdoaDataToFuse) {
+        rngBcn.tdoaDataDelayed.beacon_pos_a_NED.x += rngBcn.posOffsetNED.x;
+        rngBcn.tdoaDataDelayed.beacon_pos_a_NED.y += rngBcn.posOffsetNED.y;
+        rngBcn.tdoaDataDelayed.beacon_pos_b_NED.x += rngBcn.posOffsetNED.x;
+        rngBcn.tdoaDataDelayed.beacon_pos_b_NED.y += rngBcn.posOffsetNED.y;
     }
 
 }

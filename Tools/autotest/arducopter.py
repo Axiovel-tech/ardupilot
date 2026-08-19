@@ -7943,7 +7943,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             if m.lat != 0 or m.lon != 0:
                 return m
 
-    def BeaconPosition(self):
+    def BeaconPosition(self, sitl_mode=0, assert_tdoa=False, track_time=20, force_disarm_after=True, assert_logs=True, fly=True, extra_params=None, position_max_delta=1):
         '''Fly Beacon Position'''
         self.reboot_sitl()
 
@@ -7952,8 +7952,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         old_pos = self.get_global_position_int()
         print("old_pos=%s" % str(old_pos))
 
-        self.set_parameters({
+        params = {
             "BCN_TYPE": 10,
+            "BCN_SITL_MODE": sitl_mode,
             "BCN_LATITUDE": SITL_START_LOCATION.lat,
             "BCN_LONGITUDE": SITL_START_LOCATION.lng,
             "BCN_ALT": SITL_START_LOCATION.alt,
@@ -7967,7 +7968,10 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             "EK3_SRC1_VELZ": 0,  # None
             "EK2_ENABLE": 0,
             "AHRS_EKF_TYPE": 3,
-        })
+        }
+        if extra_params is not None:
+            params.update(extra_params)
+        self.set_parameters(params)
         self.reboot_sitl()
 
         # turn off GPS arming checks.  This may be considered a
@@ -7991,30 +7995,54 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.progress("Fetching location")
             new_pos = self.get_global_position_int()
             pos_delta = self.get_distance_int(old_pos, new_pos)
-            max_delta = 1
+            max_delta = position_max_delta
             self.progress("delta=%u want <= %u" % (pos_delta, max_delta))
             if pos_delta <= max_delta:
                 break
 
-        self.progress("Moving to ensure location is tracked")
-        self.takeoff(10, mode="STABILIZE")
-        self.change_mode("CIRCLE")
+        if fly:
+            self.progress("Moving to ensure location is tracked")
+            self.takeoff(10, mode="STABILIZE")
+            self.change_mode("CIRCLE")
 
-        self.context_push()
-        validator = vehicle_test_suite.TestSuite.ValidateGlobalPositionIntAgainstSimState(self, max_allowed_divergence=10)
-        self.install_message_hook_context(validator)
+            self.context_push()
+            validator = vehicle_test_suite.TestSuite.ValidateGlobalPositionIntAgainstSimState(self, max_allowed_divergence=10)
+            self.install_message_hook_context(validator)
 
-        self.delay_sim_time(20)
-        self.progress("Tracked location just fine")
-        self.context_pop()
+            self.delay_sim_time(track_time)
+            self.progress("Tracked location just fine")
+            self.context_pop()
 
-        self.change_mode("LOITER")
-        self.wait_groundspeed(0, 0.3, timeout=120)
-        self.land_and_disarm()
+            self.change_mode("LOITER")
+            self.wait_groundspeed(0, 0.3, timeout=120)
+            self.land_and_disarm()
 
-        self.assert_current_onboard_log_contains_message("BCN")
+        if assert_logs:
+            self.assert_current_onboard_log_contains_message("BCN")
+            if assert_tdoa:
+                self.assert_current_onboard_log_contains_message("BCNT")
+                self.assert_current_onboard_log_contains_message("XKTD")
 
-        self.disarm_vehicle(force=True)
+        if force_disarm_after:
+            self.disarm_vehicle(force=True)
+
+    def BeaconTDoAPosition(self):
+        '''Fly Beacon Position using SITL TDoA measurements'''
+        self.BeaconPosition(sitl_mode=1, assert_tdoa=True)
+
+    def BeaconTDoACubePosition(self):
+        '''Fly Beacon Position using 8-anchor SITL TDoA measurements'''
+        self.BeaconPosition(
+            sitl_mode=1,
+            assert_tdoa=True,
+            track_time=12,
+            position_max_delta=5,
+            extra_params={
+                "BCN_SITL_GEOM": 1,
+                "BCN_SITL_POS": 2,
+                "EK3_BCN_M_NSE": 0.15,
+                "EK3_SRC1_POSZ": 4,
+            })
 
     def AC_Avoidance_Beacon(self):
         '''Test beacon avoidance slide behaviour'''
@@ -9316,7 +9344,20 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         })
 
         old_onboard_logs = sorted(self.log_list())
-        self.BeaconPosition()
+        self.BeaconPosition(track_time=5, force_disarm_after=False, assert_logs=False, fly=False)
+        new_onboard_logs = sorted(self.log_list())
+
+        log_difference = [x for x in new_onboard_logs if x not in old_onboard_logs]
+        return log_difference[2]
+
+    def test_replay_beacon_tdoa_bit(self):
+        self.set_parameters({
+            "LOG_REPLAY": 1,
+            "LOG_DISARMED": 1,
+        })
+
+        old_onboard_logs = sorted(self.log_list())
+        self.BeaconPosition(sitl_mode=1, assert_tdoa=True, track_time=5, force_disarm_after=False, assert_logs=False, fly=False)
         new_onboard_logs = sorted(self.log_list())
 
         log_difference = [x for x in new_onboard_logs if x not in old_onboard_logs]
@@ -9709,11 +9750,22 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         bits = [
             ('GPS', self.test_replay_gps_bit),
             ('Beacon', self.test_replay_beacon_bit),
+            ('BeaconTDoA', self.test_replay_beacon_tdoa_bit),
             ('OpticalFlow', self.test_replay_optical_flow_bit),
         ]
         for (name, func) in bits:
             self.start_subtest("%s" % name)
             self.test_replay_bit(func)
+
+    def ReplayBeaconTDoA(self):
+        '''test TDoA beacon replay correctness'''
+        self.progress("Building Replay")
+        util.build_SITL('tool/Replay', clean=False, configure=False)
+        self.set_parameters({
+            "LOG_DARM_RATEMAX": 0,
+            "LOG_FILE_RATEMAX": 0,
+        })
+        self.test_replay_bit(self.test_replay_beacon_tdoa_bit)
 
     def test_replay_bit(self, bit):
 
@@ -11042,6 +11094,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         '''return list of all tests'''
         ret = ([
              self.BeaconPosition,
+             self.BeaconTDoAPosition,
+             self.BeaconTDoACubePosition,
+             self.ReplayBeaconTDoA,
              self.RTLSpeed,
              self.Mount,
              self.MountYawVehicleForMountROI,

@@ -14,6 +14,9 @@ AP_DAL_Beacon::AP_DAL_Beacon()
     for (uint8_t i=0; i<ARRAY_SIZE(_RBCI); i++) {
         _RBCI[i].instance = i;
     }
+    for (uint8_t i=0; i<ARRAY_SIZE(_RBTD); i++) {
+        _RBTD[i].instance = i;
+    }
 #endif
 }
 
@@ -23,6 +26,7 @@ void AP_DAL_Beacon::start_frame()
 
     const log_RBCH old = _RBCH;
     if (bcon != nullptr) {
+        _RBCH.count = bcon->count();
         _RBCH.get_vehicle_position_ned_returncode = bcon->get_vehicle_position_ned(_RBCH.vehicle_position_ned, _RBCH.accuracy_estimate);
         Location loc;
         _RBCH.get_origin_returncode = bcon->get_origin(loc);
@@ -36,7 +40,8 @@ void AP_DAL_Beacon::start_frame()
         return;
     }
 
-    for (uint8_t i=0; i<ARRAY_SIZE(_RBCI); i++) {
+    const uint8_t beacon_count = MIN(bcon->count(), ARRAY_SIZE(_RBCI));
+    for (uint8_t i=0; i<beacon_count; i++) {
         log_RBCI &RBCI = _RBCI[i];
         const log_RBCI old_RBCI = RBCI;
         RBCI.last_update_ms = bcon->beacon_last_update_ms(i);
@@ -45,6 +50,23 @@ void AP_DAL_Beacon::start_frame()
         RBCI.healthy = bcon->beacon_healthy(i);
 
         WRITE_REPLAY_BLOCK_IFCHANGED(RBCI, RBCI, old_RBCI);
+    }
+
+    _tdoa_count = MIN(bcon->tdoa_count(), ARRAY_SIZE(_RBTD));
+    for (uint8_t i=0; i<_tdoa_count; i++) {
+        log_RBTD &RBTD = _RBTD[i];
+        const log_RBTD old_RBTD = RBTD;
+        AP_Beacon::TDoAState tdoa {};
+        if (bcon->get_tdoa_data(i, tdoa)) {
+            RBTD.last_update_ms = tdoa.update_ms;
+            RBTD.distance_diff = tdoa.distance_diff;
+            RBTD.distance_diff_err = tdoa.distance_diff_err;
+            RBTD.anchor_id_a = tdoa.anchor_id_a;
+            RBTD.anchor_id_b = tdoa.anchor_id_b;
+            RBTD.healthy = tdoa.healthy;
+        }
+
+        WRITE_REPLAY_BLOCK_IFCHANGED(RBTD, RBTD, old_RBTD);
     }
 }
 

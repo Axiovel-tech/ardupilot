@@ -3,7 +3,8 @@
 #include <AP_Logger/LogStructure.h>
 
 #define LOG_IDS_FROM_BEACON \
-    LOG_BEACON_MSG
+    LOG_BEACON_MSG, \
+    LOG_BEACON_TDOA_MSG
 
 // @LoggerMessage: BCN
 // @Description: Beacon information
@@ -32,6 +33,27 @@ struct PACKED log_Beacon {
     float posz;
 };
 
+// @LoggerMessage: BCNT
+// @Description: Beacon TDoA range-difference information
+// @Field: TimeUS: Time since system startup
+// @Field: IdA: First beacon anchor instance
+// @Field: IdB: Second beacon anchor instance
+// @Field: DD: Measured distance to IdB minus distance to IdA
+// @Field: Err: TDoA range-difference one-sigma error
+// @Field: Health: True if the TDoA measurement is healthy
+
+struct PACKED log_BeaconTDoA {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t anchor_id_a;
+    uint8_t anchor_id_b;
+    float distance_diff;
+    float distance_diff_err;
+    uint8_t healthy;
+};
+
 #define LOG_STRUCTURE_FROM_BEACON \
     { LOG_BEACON_MSG, sizeof(log_Beacon), \
-        "BCN", "QBBfffffff",  "TimeUS,Health,Cnt,D0,D1,D2,D3,PosX,PosY,PosZ", "s--mmmmmmm", "F--0000000", true },
+        "BCN", "QBBfffffff",  "TimeUS,Health,Cnt,D0,D1,D2,D3,PosX,PosY,PosZ", "s--mmmmmmm", "F--0000000", true }, \
+    { LOG_BEACON_TDOA_MSG, sizeof(log_BeaconTDoA), \
+        "BCNT", "QBBffB",  "TimeUS,IdA,IdB,DD,Err,Health", "s--mm-", "F--00-", true },

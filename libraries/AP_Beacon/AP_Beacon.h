@@ -55,6 +55,17 @@ public:
         Vector3f position;      // location of beacon as an offset from origin in NED in meters
     };
 
+    // TDoA range-difference measurement between two anchors.
+    // distance_diff is distance(anchor_id_b) - distance(anchor_id_a), in meters.
+    struct TDoAState {
+        uint8_t anchor_id_a;             // first anchor index
+        uint8_t anchor_id_b;             // second anchor index
+        bool healthy;                    // true if measurement is healthy
+        float distance_diff;             // distance(anchor_b) - distance(anchor_a), in meters
+        float distance_diff_err;         // 1-sigma error of distance difference, in meters
+        uint32_t update_ms;              // system time of last update from this anchor pair
+    };
+
     // initialise any available position estimators
     void init(void);
 
@@ -96,6 +107,30 @@ public:
     // return last update time from beacon in milliseconds
     uint32_t beacon_last_update_ms(uint8_t beacon_instance) const;
 
+    // return number of TDoA anchor-pair measurements
+    uint8_t tdoa_count() const;
+
+    // return TDoA data for an anchor pair measurement instance
+    bool get_tdoa_data(uint8_t tdoa_instance, struct TDoAState& state) const;
+
+#if AP_BEACON_SITL_ENABLED
+    uint8_t sitl_measurement_mode() const { return (uint8_t)sitl_mode; }
+    float sitl_tdoa_noise() const { return sitl_tdoa_noise_m_param; }
+    float sitl_tdoa_bias() const { return sitl_tdoa_bias_m_param; }
+    float sitl_tdoa_dropout_pct() const { return sitl_tdoa_dropout_pct_param; }
+    float sitl_tdoa_outlier_pct() const { return sitl_tdoa_outlier_pct_param; }
+    float sitl_tdoa_outlier_m() const { return sitl_tdoa_outlier_m_param; }
+    int32_t sitl_tdoa_seed() const { return sitl_tdoa_seed_param; }
+    float sitl_rng_noise() const { return sitl_rng_noise_m_param; }
+    float sitl_rng_bias() const { return sitl_rng_bias_m_param; }
+    float sitl_rng_dropout_pct() const { return sitl_rng_dropout_pct_param; }
+    float sitl_rng_outlier_pct() const { return sitl_rng_outlier_pct_param; }
+    float sitl_rng_outlier_m() const { return sitl_rng_outlier_m_param; }
+    int32_t sitl_rng_seed() const { return sitl_rng_seed_param; }
+    uint8_t sitl_position_estimate_mode() const { return constrain_int16(sitl_position_estimate_param, 0, 2); }
+    uint8_t sitl_geometry() const { return sitl_geometry_param == 1 ? 1 : 0; }
+#endif
+
     // update fence boundary array
     void update_boundary_points();
 
@@ -128,6 +163,23 @@ private:
     AP_Float origin_lon;
     AP_Float origin_alt;
     AP_Int16 orient_yaw;
+#if AP_BEACON_SITL_ENABLED
+    AP_Int8 sitl_mode;
+    AP_Float sitl_tdoa_noise_m_param;
+    AP_Float sitl_tdoa_bias_m_param;
+    AP_Float sitl_tdoa_dropout_pct_param;
+    AP_Float sitl_tdoa_outlier_pct_param;
+    AP_Float sitl_tdoa_outlier_m_param;
+    AP_Int32 sitl_tdoa_seed_param;
+    AP_Float sitl_rng_noise_m_param;
+    AP_Float sitl_rng_bias_m_param;
+    AP_Float sitl_rng_dropout_pct_param;
+    AP_Float sitl_rng_outlier_pct_param;
+    AP_Float sitl_rng_outlier_m_param;
+    AP_Int32 sitl_rng_seed_param;
+    AP_Int8 sitl_position_estimate_param;
+    AP_Int8 sitl_geometry_param;
+#endif
 
     // external references
     AP_Beacon_Backend *_driver;
@@ -140,6 +192,8 @@ private:
     // individual beacon data
     uint8_t num_beacons = 0;
     BeaconState beacon_state[AP_BEACON_MAX_BEACONS];
+    uint8_t num_tdoa = 0;
+    TDoAState tdoa_state[AP_BEACON_MAX_TDOA_MEASUREMENTS];
 
     // fence boundary
     Vector2f boundary[AP_BEACON_MAX_BEACONS+1]; // array of boundary points (used for fence)

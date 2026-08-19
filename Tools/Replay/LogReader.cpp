@@ -112,6 +112,8 @@ bool LogReader::handle_log_format_msg(const struct log_Format &f)
 	    msgparser[f.type] = NEW_NOTHROW LR_MsgHandler_RBCH(formats[f.type]);
 	} else if (streq(name, "RBCI")) {
 	    msgparser[f.type] = NEW_NOTHROW LR_MsgHandler_RBCI(formats[f.type]);
+	} else if (streq(name, "RBTD")) {
+	    msgparser[f.type] = NEW_NOTHROW LR_MsgHandler_RBTD(formats[f.type]);
     } else if (streq(name, "RVOH")) {
         msgparser[f.type] = NEW_NOTHROW LR_MsgHandler_RVOH(formats[f.type]);
     } else if (streq(name, "ROFH")) {
@@ -194,4 +196,3 @@ bool LogReader::set_parameter(const char *name, float value, bool force)
     }
     return true;
 }
-

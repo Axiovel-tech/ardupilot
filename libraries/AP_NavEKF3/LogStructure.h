@@ -14,6 +14,7 @@
     LOG_XKFM_MSG, \
     LOG_XKFS_MSG, \
     LOG_XKQ_MSG,  \
+    LOG_XKTD_MSG, \
     LOG_XKT_MSG,  \
     LOG_XKTV_MSG, \
     LOG_XKV1_MSG, \
@@ -55,6 +56,30 @@ struct PACKED log_XKF0 {
     int16_t posN;           // North position of receiver rel to EKF origin (cm)
     int16_t posE;           // East position of receiver rel to EKF origin (cm)
     int16_t posD;           // Down position of receiver rel to EKF origin (cm)
+};
+
+// @LoggerMessage: XKTD
+// @Description: EKF3 TDoA beacon fusion diagnostics
+// @Field: TimeUS: Time since system startup
+// @Field: C: EKF3 core this data is for
+// @Field: IdA: First beacon anchor instance
+// @Field: IdB: Second beacon anchor instance
+// @Field: Health: True if the TDoA measurement passed fusion consistency checks
+// @Field: DD: Measured distance to IdB minus distance to IdA
+// @Field: Innov: TDoA range-difference innovation
+// @Field: SIV: sqrt of TDoA range-difference innovation variance
+// @Field: TR: TDoA range-difference innovation consistency test ratio
+struct PACKED log_XKTD {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t core;
+    uint8_t anchor_id_a;
+    uint8_t anchor_id_b;
+    uint8_t healthy;
+    float distance_diff;
+    float innov;
+    float sqrtInnovVar;
+    float testRatio;
 };
 
 
@@ -449,6 +474,8 @@ struct PACKED log_XKV {
     { LOG_XKFS_MSG, sizeof(log_XKFS), \
       "XKFS","QBBBBBBBBB","TimeUS,C,MI,BI,GI,AI,SS,GPS_GTA,GPS_CHK_WAIT,MAG_FUSION", "s#--------", "F---------" , true }, \
     { LOG_XKQ_MSG, sizeof(log_XKQ), "XKQ", "QBffff", "TimeUS,C,Q1,Q2,Q3,Q4", "s#????", "F-????" , true }, \
+    { LOG_XKTD_MSG, sizeof(log_XKTD), \
+      "XKTD","QBBBBffff","TimeUS,C,IdA,IdB,Health,DD,Innov,SIV,TR", "s#---mmm-", "F----0000" , true }, \
     { LOG_XKT_MSG, sizeof(log_XKT),   \
       "XKT", "QBIffffffff", "TimeUS,C,Cnt,IMUMin,IMUMax,EKFMin,EKFMax,AngMin,AngMax,VMin,VMax", "s#sssssssss", "F-000000000", true }, \
     { LOG_XKTV_MSG, sizeof(log_XKTV),                         \

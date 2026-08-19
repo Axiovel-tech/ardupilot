@@ -279,6 +279,35 @@ void NavEKF3_core::Log_Write_Beacon(uint64_t time_us)
     AP::logger().WriteBlock(&pkt10, sizeof(pkt10));
     rngBcn.fuseDataReportIndex++;
 }
+
+// logs the most recent TDoA beacon fusion attempt
+void NavEKF3_core::Log_Write_TDoABeacon(uint64_t time_us)
+{
+    if (core_index != frontend->primary) {
+        // log only primary instance for now
+        return;
+    }
+
+    auto &report = rngBcn.tdoaFusionReport;
+    if (!statesInitialised || !report.valid) {
+        return;
+    }
+
+    const struct log_XKTD pkt{
+        LOG_PACKET_HEADER_INIT(LOG_XKTD_MSG),
+        time_us         : time_us,
+        core            : DAL_CORE(core_index),
+        anchor_id_a     : report.anchor_id_a,
+        anchor_id_b     : report.anchor_id_b,
+        healthy         : (uint8_t)report.healthy,
+        distance_diff   : report.distance_diff,
+        innov           : report.innov,
+        sqrtInnovVar    : sqrtF(report.innovVar),
+        testRatio       : report.testRatio
+    };
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+    report.valid = false;
+}
 #endif  // EK3_FEATURE_BEACON_FUSION
 
 #if EK3_FEATURE_BODY_ODOM
@@ -405,6 +434,7 @@ void NavEKF3_core::Log_Write(uint64_t time_us)
 #if EK3_FEATURE_BEACON_FUSION
     // write range beacon fusion debug packet if the range value is non-zero
     Log_Write_Beacon(time_us);
+    Log_Write_TDoABeacon(time_us);
 #endif
 
 #if EK3_FEATURE_BODY_ODOM
