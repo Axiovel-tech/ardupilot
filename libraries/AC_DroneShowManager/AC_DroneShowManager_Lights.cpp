@@ -47,6 +47,11 @@ static float get_modulation_factor_for_light_effect(
     uint32_t timestamp, LightEffectType effect, uint16_t period_msec, uint16_t phase_msec
 );
 
+static sb_rgbw_color_t convert_rgb_color_to_rgbw(
+    sb_rgb_color_t color, int8_t white_mode, float white_gain,
+    float white_temperature, bool enhance_brightness
+);
+
 sb_rgb_color_t AC_DroneShowManager::get_rth_transition_color() const {
     return Colors::ORANGE;
 }
@@ -607,30 +612,37 @@ void AC_DroneShowManager::_update_lights()
             continue;
         }
 
-        // No need to test whether the RGB values or the gamma correction
-        // changed because the LED classes do this on their own
+        // No need to test whether the gamma correction changed because the
+        // LED class rebuilds its lookup table only when the exponent changes
         rgb_led->set_gamma(_params.led_specs[i].gamma);
+
+        // Apply gamma correction to the RGB color _before_ deriving the white
+        // channel, so that the white extraction operates on the same drive
+        // levels that are actually sent to the LEDs. The white channel is
+        // computed from these gamma-corrected values and therefore needs no
+        // separate correction.
+        sb_rgb_color_t corrected = sb_rgb_color_make(
+            rgb_led->apply_gamma(color.red),
+            rgb_led->apply_gamma(color.green),
+            rgb_led->apply_gamma(color.blue)
+        );
 
         if (rgb_led->supports_white_channel()) {
             // Code path for LEDs that support a white channel
-            sb_rgbw_conversion_t conv;
-            sb_rgbw_color_t rgbw_color;
+            sb_rgbw_color_t rgbw_color = convert_rgb_color_to_rgbw(
+                corrected,
+                _params.led_specs[i].white_mode,
+                _params.led_specs[i].white_gain,
+                _params.led_specs[i].white_temperature,
+                enhance_brightness
+            );
 
-            if (enhance_brightness && color.red == color.green && color.green == color.blue) {
-                sb_rgbw_conversion_use_fixed_value(&conv, color.red);
-            } else if (_params.led_specs[i].white_temperature > 0) {
-                sb_rgbw_conversion_use_color_temperature(&conv, _params.led_specs[i].white_temperature);
-            } else {
-                sb_rgbw_conversion_use_min_subtraction(&conv);
-            }
-
-            rgbw_color = sb_rgb_color_to_rgbw(color, conv);
             flush_needed[i] = rgb_led->set_rgbw(
                 rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white, false
             );
         } else {
             // Code path for standard RGB LEDs
-            flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
+            flush_needed[i] = rgb_led->set_rgb(corrected.red, corrected.green, corrected.blue, false);
         }
 
         any_frame_pushed |= flush_needed[i];
@@ -772,6 +784,75 @@ void AC_DroneShowManager::_repeat_last_rgb_led_command()
     for (uint8_t i = 0; i < RGB_LED_OUTPUT_COUNT; i++) {
         if (_rgb_leds[i] && flush_needed[i]) {
             _rgb_leds[i]->flush();
+        }
+    }
+}
+
+static sb_rgbw_color_t convert_rgb_color_to_rgbw(
+    sb_rgb_color_t color, int8_t white_mode, float white_gain,
+    float white_temperature, bool enhance_brightness
+) {
+    uint8_t white_content = MIN(MIN(color.red, color.green), color.blue);
+
+    if (enhance_brightness && color.red == color.green && color.green == color.blue) {
+        // Shades of gray are shown with the RGB and white LEDs driven together
+        // to enhance the brightness of the "where are you" signal sent from
+        // the GCS, no matter which white mode is selected
+        return sb_rgbw_color_make(color.red, color.green, color.blue, color.red);
+    }
+
+    switch (white_mode) {
+        case DroneShowLEDWhiteMode_Additive:
+            // Keep the RGB channels and add the white content of the color on
+            // the white channel for maximum light output
+            return sb_rgbw_color_make(
+                color.red, color.green, color.blue, white_content
+            );
+
+        case DroneShowLEDWhiteMode_CalibratedSubtractive: {
+            // Move as much of the white content of the color to the white LED
+            // as the white LED can reproduce, given that it emits white_gain
+            // times the light of the RGB LEDs combined at the same drive
+            // level. Any white content that the white LED cannot provide on
+            // its own stays on the RGB channels so the total light output
+            // matches what an RGB-only LED module would show.
+            float drive, replaced;
+            uint8_t replaced_int;
+
+            if (!(white_gain > 0.0f)) {
+                // Zero, negative or NaN gain; assume an ideal white LED
+                white_gain = 1.0f;
+            }
+
+            drive = MIN(white_content / white_gain, 255.0f);
+            replaced = drive * white_gain;
+            replaced_int = MIN(static_cast<uint8_t>(roundf(replaced)), white_content);
+
+            return sb_rgbw_color_make(
+                color.red - replaced_int,
+                color.green - replaced_int,
+                color.blue - replaced_int,
+                static_cast<uint8_t>(roundf(drive))
+            );
+        }
+
+        case DroneShowLEDWhiteMode_Subtractive:
+        default: {
+            sb_rgbw_conversion_t conv;
+
+            // Initialize conv fully before use;
+            // sb_rgbw_conversion_use_color_temperature() reads the previous
+            // state of the object for caching purposes and must not see
+            // uninitialized stack memory
+            sb_rgbw_conversion_turn_off(&conv);
+
+            if (white_temperature > 0) {
+                sb_rgbw_conversion_use_color_temperature(&conv, white_temperature);
+            } else {
+                sb_rgbw_conversion_use_min_subtraction(&conv);
+            }
+
+            return sb_rgb_color_to_rgbw(color, conv);
         }
     }
 }
