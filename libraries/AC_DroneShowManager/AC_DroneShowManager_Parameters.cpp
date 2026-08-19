@@ -212,7 +212,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Range: 0 2
     // @Increment: 0.05
     // @User: Advanced
-    AP_GROUPINFO("ACC_FF_GAIN", 46, AC_DroneShowManager, _params.acceleration_feedforward_gain, 1.0f),
+    AP_GROUPINFO("ACC_FF_GAIN", 60, AC_DroneShowManager, _params.acceleration_feedforward_gain, 1.0f),
 
     // @Param: ACC_FF_MAX
     // @DisplayName: Acceleration feed-forward envelope fraction
@@ -220,7 +220,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Range: 0 1
     // @Increment: 0.05
     // @User: Advanced
-    AP_GROUPINFO("ACC_FF_MAX", 47, AC_DroneShowManager, _params.acceleration_feedforward_max_fraction, 0.7f),
+    AP_GROUPINFO("ACC_FF_MAX", 61, AC_DroneShowManager, _params.acceleration_feedforward_max_fraction, 0.7f),
 
     // @Param: TAKEOFF_ALT
     // @DisplayName: Takeoff altitude
