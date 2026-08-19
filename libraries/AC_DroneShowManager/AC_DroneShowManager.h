@@ -112,7 +112,8 @@ public:
         NONE = 0,         // No start time was set
         PARAMETER = 1,    // start time was set by the user via the START_TIME parameter
         START_METHOD = 2, // start time was set by calling the schedule_delayed_start_after() method
-        RC_SWITCH = 3     // start time was set via the RC switch action
+        RC_SWITCH = 3,    // start time was set via the RC switch action
+        UWB_LTC = 4       // start time was derived from the shared UWB clock
     };
 
     // Simple struct to contain a guided mode command that should be sent during
@@ -254,7 +255,7 @@ public:
     // determining whether the start time was changed.
     uint64_t get_start_time_epoch_undefined() const {
         return (
-            _params.time_sync_mode == TimeSyncMode_Countdown
+            !uses_gps_time_for_show_start()
             ? _start_time_on_internal_clock_usec
             : _start_time_unix_usec
         );
@@ -512,6 +513,10 @@ public:
 
     // Returns whether the manager uses GPS time to start the show
     bool uses_gps_time_for_show_start() const { return _params.time_sync_mode == TimeSyncMode_GPS; }
+
+    // Returns whether ordinary countdown messages should set the start time.
+    // The RC fallback bypasses this check deliberately.
+    bool uses_countdown_messages_for_show_start() const { return _params.time_sync_mode == TimeSyncMode_Countdown; }
     
     // Writes a message containing the trigger of a collective RTL maneuver into the log
     void write_crth_trigger_log_message(float rth_start_time_sec, sb_vector3_t start) const;
@@ -737,7 +742,7 @@ private:
 
     // Start time of the show, in microseconds, according to the internal clock
     // of the drone, zero if unset. This variable is used _only_ if the time
-    // synchronisation mode is set to use a countdown-based method.
+    // synchronisation mode is set to use an internal-clock-based method.
     uint64_t _start_time_on_internal_clock_usec;
 
     // Start time of the show, in microseconds, as a UNIX timestamp, zero if unset.
@@ -745,6 +750,18 @@ private:
     // some other absolute (external) time source that is guaranteed to be
     // synchronized across drones.
     uint64_t _start_time_unix_usec;
+
+    struct {
+        uint64_t cluster_start_tick;
+        uint64_t last_cluster_tick;
+        uint64_t best_internal_deadline_usec;
+        uint32_t last_message_msec;
+        uint16_t generation;
+        uint8_t consistent_samples;
+        bool have_generation;
+        bool locked;
+        bool committed;
+    } _uwb_show_sync;
 
     // Takeoff position, in local coordinates, relative to the show coordinate system.
     // Zero if no show data is loaded. Units are in millimeters.
@@ -863,6 +880,11 @@ private:
     // Clears the start time of the drone show if it was set by the user with the RC switch
     void _clear_start_time_if_set_by_switch();
 
+    // Handles and monitors an LTC-derived show deadline received from the RTLS tag.
+    bool _handle_uwb_show_sync_message(const uint8_t* data, uint8_t length);
+    void _update_uwb_show_sync();
+    void _reset_uwb_show_sync();
+
     // Copies the settings of the show coordinate system from the parameter section
     // to the given variable. Returns false if the show coordinate system was not
     // specified by the user yet.
@@ -938,7 +960,9 @@ private:
     const sb_control_output_t* _get_raw_show_control_output_at_seconds(float time);
     
     // Handles a generic MAVLink DATA* message from the ground station.
-    bool _handle_custom_data_message(mavlink_channel_t chan, uint8_t type, void* data, uint8_t length);
+    bool _handle_custom_data_message(
+        mavlink_channel_t chan, uint8_t source_component, uint8_t type, void* data, uint8_t length
+    );
 
     // Handles a MAVLink DATA16 message from the ground station.
     bool _handle_data16_message(mavlink_channel_t chan, const mavlink_message_t& msg);

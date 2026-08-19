@@ -82,7 +82,8 @@ enum LightEffectPriority {
 // Time synchronization mode used when starting the show
 enum TimeSyncMode {
     TimeSyncMode_Countdown = 0, // Ignore SHOW_START_TIME and expect countdown messages from GCS
-    TimeSyncMode_GPS = 1 // Use SHOW_START_TIME and synchronize based on GPS time
+    TimeSyncMode_GPS = 1, // Use SHOW_START_TIME and synchronize based on GPS time
+    TimeSyncMode_UWBLTC = 2 // Use an LTC-derived deadline in the shared UWB clock domain
 };
 
 // Possible actions to take at the end of the show

@@ -182,7 +182,9 @@ bool AC_DroneShowManager::handle_message(mavlink_channel_t chan, const mavlink_m
     }
 }
 
-bool AC_DroneShowManager::_handle_custom_data_message(mavlink_channel_t chan, uint8_t type, void* data, uint8_t length)
+bool AC_DroneShowManager::_handle_custom_data_message(
+    mavlink_channel_t chan, uint8_t source_component, uint8_t type, void* data, uint8_t length
+)
 {
     uint8_t reply[16];
     
@@ -220,10 +222,10 @@ bool AC_DroneShowManager::_handle_custom_data_message(mavlink_channel_t chan, ui
                 if (length >= sizeof(CustomPackets::start_config_t)) {
                     // Optional second part is used by the GCS to convey how many
                     // milliseconds there are until the start of the show. If this
-                    // part exists and is positive, _and_ we are using the internal
-                    // clock to synchronize the start, then we update the start
-                    // time based on this
-                    if (!uses_gps_time_for_show_start()) {
+                    // part exists and is positive, _and_ we are using the legacy
+                    // countdown mode, then we update the start time based on this.
+                    // UWB/LTC mode has its own dedicated clock packet.
+                    if (uses_countdown_messages_for_show_start()) {
                         int32_t countdown_msec = start_config->optional_part.countdown_msec;
 
                         if (countdown_msec < -GPS_WEEK_LENGTH_MSEC) {
@@ -294,6 +296,16 @@ bool AC_DroneShowManager::_handle_custom_data_message(mavlink_channel_t chan, ui
         // Time axis configuration packet, used to implement suspension and resume
         case CustomPackets::TIME_AXIS_CONFIG:
             return _handle_time_axis_configuration_packet(data, length);
+
+        // Shared UWB clock and LTC-derived absolute deadline from the RTLS tag.
+        case CustomPackets::RTLS_SHOW_SYNC:
+            // Show timing is accepted only from the RTLS tag component. The
+            // deployment contract binds component 197 to the local dedicated
+            // tag-to-autopilot MAVLink link; WiFi/GCS links are observational.
+            if (source_component != CustomPackets::RTLS_COMPONENT_ID) {
+                return false;
+            }
+            return _handle_uwb_show_sync_message(static_cast<const uint8_t*>(data), length);
     }
 
     return false;
@@ -306,7 +318,7 @@ bool AC_DroneShowManager::_handle_data16_message(mavlink_channel_t chan, const m
     if (packet.type != CustomPackets::GCS_TO_DRONE || packet.len < 1) {
         return false;
     }
-    return _handle_custom_data_message(chan, packet.data[0], packet.data + 1, packet.len - 1);
+    return _handle_custom_data_message(chan, msg.compid, packet.data[0], packet.data + 1, packet.len - 1);
 }
 
 bool AC_DroneShowManager::_handle_data32_message(mavlink_channel_t chan, const mavlink_message_t& msg)
@@ -316,7 +328,7 @@ bool AC_DroneShowManager::_handle_data32_message(mavlink_channel_t chan, const m
     if (packet.type != CustomPackets::GCS_TO_DRONE || packet.len < 1) {
         return false;
     }
-    return _handle_custom_data_message(chan, packet.data[0], packet.data + 1, packet.len - 1);
+    return _handle_custom_data_message(chan, msg.compid, packet.data[0], packet.data + 1, packet.len - 1);
 }
 
 bool AC_DroneShowManager::_handle_data64_message(mavlink_channel_t chan, const mavlink_message_t& msg)
@@ -326,7 +338,7 @@ bool AC_DroneShowManager::_handle_data64_message(mavlink_channel_t chan, const m
     if (packet.type != CustomPackets::GCS_TO_DRONE || packet.len < 1) {
         return false;
     }
-    return _handle_custom_data_message(chan, packet.data[0], packet.data + 1, packet.len - 1);
+    return _handle_custom_data_message(chan, msg.compid, packet.data[0], packet.data + 1, packet.len - 1);
 }
 
 bool AC_DroneShowManager::_handle_data96_message(mavlink_channel_t chan, const mavlink_message_t& msg)
@@ -336,7 +348,7 @@ bool AC_DroneShowManager::_handle_data96_message(mavlink_channel_t chan, const m
     if (packet.type != CustomPackets::GCS_TO_DRONE || packet.len < 1) {
         return false;
     }
-    return _handle_custom_data_message(chan, packet.data[0], packet.data + 1, packet.len - 1);
+    return _handle_custom_data_message(chan, msg.compid, packet.data[0], packet.data + 1, packet.len - 1);
 }
 
 bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uint8_t length)

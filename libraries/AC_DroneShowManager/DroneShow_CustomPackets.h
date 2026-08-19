@@ -16,11 +16,16 @@
     uint8_t rtcm_counters[2]
 
 namespace CustomPackets {
+    static const uint8_t RTLS_COMPONENT_ID = 197;
+
     static const uint8_t START_CONFIG = 1;
     static const uint8_t DEPRECATED_CRTL_TRIGGER = 2;
     static const uint8_t SIMPLE_GEOFENCE_SETUP = 3;
     static const uint8_t ACKNOWLEDGMENT = 4;
     static const uint8_t TIME_AXIS_CONFIG = 5;
+    // DATA32 payload, after this type byte: little-endian cluster_now_tick
+    // (uint64), cluster_start_tick (uint64, zero cancels), generation (uint16).
+    static const uint8_t RTLS_SHOW_SYNC = 6;
 
     static const uint8_t DRONE_TO_GCS_STATUS = 0x5b;
     static const uint8_t GCS_TO_DRONE = 0x5c;
