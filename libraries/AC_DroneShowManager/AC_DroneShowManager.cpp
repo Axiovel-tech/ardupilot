@@ -312,8 +312,12 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
                 const float envelope_fraction = constrain_float(
                     get_acceleration_feedforward_max_fraction(), 0.0f, 1.0f
                 );
-                const float max_accel_xy = _wp_nav->get_wp_acceleration() * envelope_fraction;
-                const float max_accel_z = _wp_nav->get_accel_z() * envelope_fraction;
+                // The show command remains in the manager's legacy NEU cm/s/s
+                // convention. ArduPilot 4.7 renamed the WPNAV accessors and
+                // exposes both metre and centimetre variants, so use the
+                // centimetre variants explicitly here.
+                const float max_accel_xy = _wp_nav->get_wp_acceleration_cmss() * envelope_fraction;
+                const float max_accel_z = _wp_nav->get_accel_D_cmss() * envelope_fraction;
 
                 Vector2f accel_xy = command.acc.xy();
                 const bool clipped_xy = accel_xy.limit_length(max_accel_xy);
