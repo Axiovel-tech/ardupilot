@@ -928,7 +928,14 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
             _landing_hold_z_cm = hold_target.z;
 
             copter.mode_guided.init(true);
-            if (!copter.mode_guided.set_destination(hold_target)) {
+            // ArduPilot 4.7's guided position API takes NED metres; the show
+            // mode still stores its landing state in legacy NEU centimetres.
+            const Vector3p hold_target_ned_m {
+                hold_target.x * 0.01,
+                hold_target.y * 0.01,
+                -hold_target.z * 0.01
+            };
+            if (!copter.mode_guided.set_pos_NED_m(hold_target_ned_m)) {
                 // The hold target was rejected, which can only mean it
                 // violates the fence. Do not anchor the descent to a point
                 // we are not allowed to reach -- land in place instead.
@@ -953,8 +960,11 @@ void ModeDroneShow::landing_start_descent()
         // Anchor the descent to the intended landing position instead of the
         // stopping point inherited from the previous controller state so we
         // land as close to our destination as possible
-        pos_control->set_pos_desired_xy_cm(
-            Vector2f(_landing_target_neu_cm.x, _landing_target_neu_cm.y)
+        pos_control->set_pos_desired_NE_m(
+            Vector2p(
+                _landing_target_neu_cm.x * 0.01,
+                _landing_target_neu_cm.y * 0.01
+            )
         );
     }
 }
