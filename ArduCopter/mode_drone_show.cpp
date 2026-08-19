@@ -805,7 +805,7 @@ void ModeDroneShow::performing_run()
                 // This should not happen but let's be defensive. Safest is to
                 // land in place, and it is consistent with legacy behaviour
                 gcs().send_text(MAV_SEVERITY_WARNING, "Invalid post-show action, landing in place");
-                landing_start(/* at_show_landing_target = */ true);
+                landing_start(/* at_show_landing_target = */ false);
                 break;
         }
     }
