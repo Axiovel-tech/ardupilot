@@ -177,7 +177,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: CTRL_MODE
     // @DisplayName: Flags to configure the show position control algorithm
     // @Description: Controls various aspects of the position control algorithm built into the firmware
-    // @Bitmask: 0:Enable velocity control,1:Unused (was acceleration control)
+    // @Bitmask: 0:Enable velocity control,1:Enable acceleration feed-forward
     // @User: Advanced
     AP_GROUPINFO("CTRL_MODE", 11, AC_DroneShowManager, _params.control_mode_flags, DroneShowControl_VelocityControlEnabled),
 
@@ -205,6 +205,22 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 0.1
     // @User: Advanced
     AP_GROUPINFO("VEL_FF_GAIN", 16, AC_DroneShowManager, _params.velocity_feedforward_gain, 1.0f),
+
+    // @Param: ACC_FF_GAIN
+    // @DisplayName: Acceleration feed-forward gain
+    // @Description: Gain applied to trajectory acceleration when acceleration feed-forward is enabled in SHOW_CTRL_MODE. The command is constrained to the WPNAV acceleration limits after applying this gain.
+    // @Range: 0 2
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ACC_FF_GAIN", 60, AC_DroneShowManager, _params.acceleration_feedforward_gain, 1.0f),
+
+    // @Param: ACC_FF_MAX
+    // @DisplayName: Acceleration feed-forward envelope fraction
+    // @Description: Largest fraction of the WPNAV acceleration limits that the show acceleration feed-forward may consume. Guided mode configures the shaping limit and the correction limit from the same WPNAV_ACCEL, so the remainder is the headroom left for the position controller to correct tracking error. Values close to 1 let a demanding trajectory saturate the controller.
+    // @Range: 0 1
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ACC_FF_MAX", 61, AC_DroneShowManager, _params.acceleration_feedforward_max_fraction, 0.7f),
 
     // @Param: TAKEOFF_ALT
     // @DisplayName: Takeoff altitude
@@ -368,7 +384,27 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MAX_ESC_ERR", 39, AC_DroneShowManager, _params.max_esc_error_rate_pcnt, DEFAULT_MAX_ESC_ERROR_RATE_PCNT),
 
-    // Currently used max parameter ID: 40; update this if you add more parameters.
+    // @Param: LAND_XY_ERR
+    // @DisplayName: Maximum XY error to start the post-show descent
+    // @Description: Maximum allowed horizontal distance between the estimated position of the drone and the intended landing position of the show trajectory before the post-show landing is allowed to start descending. While the error is larger, the drone holds position above the intended landing position. Zero disables the gate and the drone starts descending immediately, wherever it is. Useful when the drone must land accurately, e.g. on a docking or charging pad.
+    // @Range: 0 2
+    // @Increment: 0.05
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("LAND_XY_ERR", 62, AC_DroneShowManager, _params.landing_max_xy_error_m, 0.0f),
+
+    // @Param: LAND_WAIT
+    // @DisplayName: Maximum time to wait before the post-show descent
+    // @Description: Maximum time the drone may spend holding position above the intended landing position, waiting for the horizontal error to drop below SHOW_LAND_XY_ERR, before it starts descending anyway. Only used when SHOW_LAND_XY_ERR is positive.
+    // @Range: 0 60
+    // @Increment: 1
+    // @Units: s
+    // @User: Advanced
+    AP_GROUPINFO("LAND_WAIT", 63, AC_DroneShowManager, _params.landing_max_wait_sec, 10.0f),
+
+    // Currently used max parameter ID: 63 (LAND_XY_ERR/LAND_WAIT sit at the top
+    // of the 6-bit index range on purpose: they are fork-local, and the vendor
+    // grows this table sequentially -- IDs 48+ stay free for upstream merges).
     // Note that the max parameter ID may appear in the middle of the above list.
 
     AP_GROUPEND

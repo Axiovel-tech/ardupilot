@@ -255,7 +255,7 @@ public:
      *
      * pos        : position in the RH navigation frame. Frame is assumed to be NED (m)
      * quat       : quaternion desribing the rotation from navigation frame to body frame
-     * posErr     : 1-sigma spherical position error (m)
+     * posErr     : external-navigation position errors; EKF2 uses the legacy scalar (m)
      * angErr     : 1-sigma spherical angle error (rad)
      * timeStamp_ms : system time the measurement was taken, not the time it was received (mSec)
      * delay_ms   : average delay of external nav system measurements relative to inertial measurements
@@ -264,7 +264,7 @@ public:
      * Sensor offsets are pulled directly from the AP_VisualOdom library
      *
     */
-    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
+    void writeExtNavData(const Vector3f &pos, const Quaternion &quat, const ExtNavPositionError &posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms);
 
     /*
      * Write velocity data from an external navigation system

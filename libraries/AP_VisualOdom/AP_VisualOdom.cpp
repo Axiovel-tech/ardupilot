@@ -91,12 +91,20 @@ const AP_Param::GroupInfo AP_VisualOdom::var_info[] = {
     AP_GROUPINFO("_VEL_M_NSE", 5, AP_VisualOdom, _vel_noise, 0.1),
 
     // @Param: _POS_M_NSE
-    // @DisplayName: Visual odometry position measurement noise 
-    // @Description: Visual odometry position measurement noise minimum (meters). This value will be used if the sensor provides a lower noise value (or no noise value)
+    // @DisplayName: Visual odometry horizontal position measurement noise
+    // @Description: Visual odometry horizontal position measurement noise minimum (meters). This value will be used if the sensor provides a lower noise value (or no noise value). If _ALT_M_NSE is zero this value is also used for the vertical axis.
     // @Units: m
-    // @Range: 0.1 10.0
+    // @Range: 0.01 10.0
     // @User: Advanced
     AP_GROUPINFO("_POS_M_NSE", 6, AP_VisualOdom, _pos_noise, 0.2f),
+
+    // @Param: _ALT_M_NSE
+    // @DisplayName: Visual odometry vertical position measurement noise
+    // @Description: Visual odometry vertical position measurement noise minimum (meters). Set this when the sensor's vertical accuracy differs from its horizontal accuracy, as is typical for UWB systems whose anchors are spread horizontally. Zero means use _POS_M_NSE for the vertical axis as well.
+    // @Units: m
+    // @Range: 0.0 10.0
+    // @User: Advanced
+    AP_GROUPINFO("_ALT_M_NSE", 9, AP_VisualOdom, _alt_noise, 0.0f),
 
     // @Param: _YAW_M_NSE
     // @DisplayName: Visual odometry yaw measurement noise
@@ -198,7 +206,7 @@ void AP_VisualOdom::handle_vision_position_delta_msg(const mavlink_message_t &ms
 // general purpose method to consume position estimate data and send to EKF
 // distances in meters, roll, pitch and yaw are in radians
 // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality)
+void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance)
 {
     // exit immediately if not enabled
     if (!enabled()) {
@@ -210,13 +218,13 @@ void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_
         // convert attitude to quaternion and call backend
         Quaternion attitude;
         attitude.from_euler(roll, pitch, yaw);
-        _driver->handle_pose_estimate(remote_time_us, time_ms, x, y, z, attitude, posErr, angErr, reset_counter, quality);
+        _driver->handle_pose_estimate(remote_time_us, time_ms, x, y, z, attitude, posErr, angErr, reset_counter, quality, pos_covariance);
     }
 }
 
 // general purpose method to consume position estimate data and send to EKF
 // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality)
+void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance)
 {
     // exit immediately if not enabled
     if (!enabled()) {
@@ -225,7 +233,7 @@ void AP_VisualOdom::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_
 
     // call backend
     if (_driver != nullptr) {
-        _driver->handle_pose_estimate(remote_time_us, time_ms, x, y, z, attitude, posErr, angErr, reset_counter, quality);
+        _driver->handle_pose_estimate(remote_time_us, time_ms, x, y, z, attitude, posErr, angErr, reset_counter, quality, pos_covariance);
     }
 }
 

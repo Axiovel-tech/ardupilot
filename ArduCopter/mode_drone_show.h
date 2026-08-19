@@ -110,6 +110,24 @@ private:
     // takeoff in the show trajectory is slower.
     bool _altitude_locked_above_takeoff_altitude;
 
+    // Intended landing position of the show trajectory, in NED m relative to
+    // the EKF origin; valid only if _landing_target_valid is set. Captured
+    // when the landing stage starts at the end of a show.
+    Vector3p _landing_target_ned_m;
+
+    // Stores whether _landing_target_ned_m holds a valid landing target
+    bool _landing_target_valid;
+
+    // Down-axis coordinate of the pre-descent hold relative to the EKF origin,
+    // in NED m; the gated descent may only start once this altitude is reached.
+    postype_t _landing_hold_d_m;
+
+    // Stores whether the landing stage has started the actual descent. When
+    // the XY error gate is enabled, the landing stage first holds position
+    // above the intended landing position and starts the descent only when
+    // the horizontal error dropped below the limit (or a timeout passed).
+    bool _landing_descent_started;
+
     // Sets the stage of the execution to the given value
     void _set_stage(DroneShowModeStage value);
 
@@ -140,8 +158,9 @@ private:
     void performing_run();
     bool performing_completed() const;
 
-    void landing_start();
+    void landing_start(bool at_show_landing_target = false);
     void landing_run();
+    void landing_start_descent();
     bool landing_completed() const;
 
     void rtl_start();

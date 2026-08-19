@@ -159,7 +159,8 @@ void NavEKF3_core::ResetPosition(resetDataSource posResetSource)
             stateStruct.position.x = extNavDataDelayed.pos.x;
             stateStruct.position.y = extNavDataDelayed.pos.y;
             // set the variances as received from external nav system data
-            P[7][7] = P[8][8] = sq(extNavDataDelayed.posErr);
+            P[7][7] = sq(extNavDataDelayed.posErr.x);
+            P[8][8] = sq(extNavDataDelayed.posErr.y);
 #endif // EK3_FEATURE_EXTERNAL_NAV
         }
     }
@@ -745,7 +746,7 @@ void NavEKF3_core::FuseVelPosNED()
             // Use GPS reported position accuracy if available and floor at value set by GPS position noise parameter
 #if EK3_FEATURE_EXTERNAL_NAV
             if (extNavUsedForPos) {
-                R_OBS[3] = sq(constrain_ftype(extNavDataDelayed.posErr, 0.01f, 100.0f));
+                R_OBS[3] = sq(constrain_ftype(extNavDataDelayed.posErr.x, 0.01f, 10.0f));
             } else
 #endif
             if (gpsPosAccuracy > 0.0f) {
@@ -755,7 +756,14 @@ void NavEKF3_core::FuseVelPosNED()
                 const ftype posErr = frontend->gpsPosVarAccScale * accNavMag;
                 R_OBS[3] = sq(constrain_ftype(frontend->_gpsHorizPosNoise, 0.1f, 10.0f)) + sq(posErr);
             }
-            R_OBS[4] = R_OBS[3];
+#if EK3_FEATURE_EXTERNAL_NAV
+            if (extNavUsedForPos) {
+                R_OBS[4] = sq(constrain_ftype(extNavDataDelayed.posErr.y, 0.01f, 10.0f));
+            } else
+#endif
+            {
+                R_OBS[4] = R_OBS[3];
+            }
             // For data integrity checks we use the same measurement variances as used to calculate the Kalman gains for all measurements except GPS horizontal velocity
             // For horizontal GPS velocity we don't want the acceptance radius to increase with reported GPS accuracy so we use a value based on best GPS performance
             // plus a margin for manoeuvres. It is better to reject GPS horizontal velocity errors early
@@ -1323,7 +1331,7 @@ void NavEKF3_core::selectHeightForFusion()
     if (extNavDataToFuse && (activeHgtSource == AP_NavEKF_Source::SourceZ::EXTNAV)) {
         hgtMea = -extNavDataDelayed.pos.z;
         velPosObs[5] = -hgtMea;
-        posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErr, 0.1f, 10.0f));
+        posDownObsNoise = sq(constrain_ftype(extNavDataDelayed.posErr.z, 0.01f, 10.0f));
         fuseHgtData = true;
     } else
 #endif // EK3_FEATURE_EXTERNAL_NAV

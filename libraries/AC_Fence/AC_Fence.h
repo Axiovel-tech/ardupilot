@@ -127,6 +127,12 @@ public:
     // returns true if the destination is within fence (used to reject waypoints outside the fence)
     bool check_destination_within_fence(const class Location& loc);
 
+    // returns true if the destination is within the horizontal (circle and
+    // polygon) fences, ignoring the altitude fences; used for targets whose
+    // altitude is not commanded, e.g. the XY anchor of a landing, where the
+    // floor fence would be auto-disabled during the descent anyway
+    bool check_horizontal_destination_within_fence(const class Location& loc);
+
     /// get_breaches - returns bit mask of the fence types that have been breached
     uint8_t get_breaches() const { return _breached_fences; }
 

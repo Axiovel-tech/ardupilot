@@ -209,10 +209,33 @@ public:
     // system, using centimeters as units.
     bool get_desired_global_position_at_seconds(float time, Location& loc) WARN_IF_UNUSED;
 
+    // Returns the position where the show trajectory intends the drone to
+    // land, in NED meters relative to the EKF origin. This is the
+    // trajectory evaluated at its end, so it already includes the adjustment
+    // made for circular trajectories when the corresponding show option is
+    // enabled. Used to anchor the post-show landing to the intended landing
+    // point instead of the incidental stopping point of the position
+    // controller.
+    bool get_landing_position_NED_m(Vector3p& pos) WARN_IF_UNUSED;
+
+    // Returns the maximum allowed horizontal distance from the intended
+    // landing position before the post-show landing may start descending,
+    // in meters. Zero or negative disables the gate.
+    float get_landing_max_xy_error_m() const { return _params.landing_max_xy_error_m; }
+
+    // Returns the maximum time the drone may spend holding position above
+    // the intended landing position waiting for the XY error to drop below
+    // the limit, in seconds, before descending anyway.
+    float get_landing_max_wait_sec() const { return _params.landing_max_wait_sec; }
+
     // Returns the desired velocity of the drone during the drone show the
     // given number of seconds after the start time, in the global NEU
     // cooordinate system, using centimeters per seconds as units.
     bool get_desired_velocity_neu_in_cms_per_seconds_at_seconds(float time, Vector3f& vel) WARN_IF_UNUSED;
+
+    // Returns desired wall-clock acceleration during the current screenplay
+    // scene, in the global NEU coordinate system and cm/s/s.
+    bool get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(float time, Vector3f& acc) WARN_IF_UNUSED;
 
     // Returns the desired yaw and yaw rate of the drone during the drone show the
     // given number of seconds after the start time. Yaw is returned in centidegrees
@@ -314,6 +337,14 @@ public:
 
     // Returns the velocity feed-forward gain factor to use during velocity control
     float get_velocity_feedforward_gain() const { return _params.velocity_feedforward_gain; }
+
+    // Returns the acceleration feed-forward gain factor to use during acceleration control
+    float get_acceleration_feedforward_gain() const { return _params.acceleration_feedforward_gain; }
+
+    // Returns the largest fraction of the WPNAV acceleration envelope that the show
+    // feed-forward is allowed to consume; the remainder is reserved for the position
+    // controller's corrective term.
+    float get_acceleration_feedforward_max_fraction() const { return _params.acceleration_feedforward_max_fraction; }
 
     // Handles a MAVLink user command forwarded to the drone show manager by the central MAVLink handler
     MAV_RESULT handle_command_int_packet(const mavlink_command_int_t &packet);
@@ -428,6 +459,12 @@ public:
     // lower-level position controller of ArduPilot
     bool is_velocity_control_enabled() const {
         return _params.control_mode_flags & DroneShowControl_VelocityControlEnabled;
+    }
+
+    // Returns whether trajectory acceleration is fed into ArduPilot's
+    // lower-level position controller.
+    bool is_acceleration_control_enabled() const {
+        return _params.control_mode_flags & DroneShowControl_AccelerationControlEnabled;
     }
 
     // Returns whether a show file was identified and loaded at boot time
@@ -561,7 +598,7 @@ public:
     AC_BubbleFence bubble_fence;
 
     // Landing speed; we assume that the drone should attempt to land with this
-    // vertical speed if LAND_SPEED seems invalid
+    // vertical speed if LAND_SPD_MS seems invalid
     static constexpr float DEFAULT_LANDING_SPEED_METERS_PER_SEC = 1.0f;
 
     // Takeoff acceleration; we assume that the drone attempts to take off with
@@ -633,8 +670,25 @@ private:
         // Velocity feed-forward gain when velocity control is being used.
         AP_Float velocity_feedforward_gain;
 
+        // Acceleration feed-forward gain when acceleration control is being used.
+        AP_Float acceleration_feedforward_gain;
+
+        // Largest fraction of the WPNAV acceleration envelope that the show
+        // feed-forward may consume.
+        AP_Float acceleration_feedforward_max_fraction;
+
         // Takeoff altitude
         AP_Float takeoff_altitude_m;
+
+        // Maximum allowed horizontal distance from the intended landing
+        // position before the post-show landing may start descending, in
+        // meters; zero or negative disables the gate
+        AP_Float landing_max_xy_error_m;
+
+        // Maximum time to spend holding position above the intended landing
+        // position waiting for the XY error to drop below the limit, in
+        // seconds
+        AP_Float landing_max_wait_sec;
 
         // Time synchronization mode
         AP_Int8 time_sync_mode;
