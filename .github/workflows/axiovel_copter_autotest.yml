@@ -2,6 +2,10 @@ name: Axiovel Copter autotest
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - 'AV*'
+      - 'AV*/**'
   pull_request:
     types:
       - opened
@@ -9,8 +13,8 @@ on:
       - reopened
       - ready_for_review
     branches:
-      - 'AVCopter*'
-      - 'AVCopter/**'
+      - 'AV*'
+      - 'AV*/**'
 
 permissions:
   contents: read
