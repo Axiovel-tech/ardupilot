@@ -46,6 +46,7 @@ namespace Colors {
 static float get_modulation_factor_for_light_effect(
     uint32_t timestamp, LightEffectType effect, uint16_t period_msec, uint16_t phase_msec
 );
+static uint8_t apply_led_channel_gain(uint8_t value, float gain);
 
 sb_rgb_color_t AC_DroneShowManager::get_rth_transition_color() const {
     return Colors::ORANGE;
@@ -625,12 +626,21 @@ void AC_DroneShowManager::_update_lights()
             }
 
             rgbw_color = sb_rgb_color_to_rgbw(color, conv);
+            rgbw_color.red = apply_led_channel_gain(rgbw_color.red, _params.led_specs[i].red_gain);
+            rgbw_color.green = apply_led_channel_gain(rgbw_color.green, _params.led_specs[i].green_gain);
+            rgbw_color.blue = apply_led_channel_gain(rgbw_color.blue, _params.led_specs[i].blue_gain);
+            rgbw_color.white = apply_led_channel_gain(rgbw_color.white, _params.led_specs[i].white_gain);
             flush_needed[i] = rgb_led->set_rgbw(
                 rgbw_color.red, rgbw_color.green, rgbw_color.blue, rgbw_color.white, false
             );
         } else {
             // Code path for standard RGB LEDs
-            flush_needed[i] = rgb_led->set_rgb(color.red, color.green, color.blue, false);
+            flush_needed[i] = rgb_led->set_rgb(
+                apply_led_channel_gain(color.red, _params.led_specs[i].red_gain),
+                apply_led_channel_gain(color.green, _params.led_specs[i].green_gain),
+                apply_led_channel_gain(color.blue, _params.led_specs[i].blue_gain),
+                false
+            );
         }
 
         any_frame_pushed |= flush_needed[i];
@@ -803,4 +813,18 @@ static float get_modulation_factor_for_light_effect(
         default:
             return 0.0;
     }
+}
+
+static uint8_t apply_led_channel_gain(uint8_t value, float gain)
+{
+    if (!(gain > 0.0f)) {
+        // Covers zero, negative and NaN gains without triggering constrain_float's NaN guard.
+        return 0;
+    }
+    if (gain > 4.0f) {
+        gain = 4.0f;
+    }
+
+    const float scaled = value * gain;
+    return static_cast<uint8_t>(constrain_int32(static_cast<int32_t>(scaled + 0.5f), 0, 255));
 }

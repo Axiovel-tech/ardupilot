@@ -107,6 +107,38 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("LED0_MINBRI", 32, AC_DroneShowManager, _params.led_specs[0].min_brightness, 0.0f),
 
+    // @Param: LED0_RGAIN
+    // @DisplayName: Red gain of LED channel 0
+    // @Description: Multiplier applied to the red LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the red LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED0_RGAIN", 46, AC_DroneShowManager, _params.led_specs[0].red_gain, 1.0f),
+
+    // @Param: LED0_GGAIN
+    // @DisplayName: Green gain of LED channel 0
+    // @Description: Multiplier applied to the green LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the green LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED0_GGAIN", 47, AC_DroneShowManager, _params.led_specs[0].green_gain, 1.0f),
+
+    // @Param: LED0_BGAIN
+    // @DisplayName: Blue gain of LED channel 0
+    // @Description: Multiplier applied to the blue LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the blue LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED0_BGAIN", 48, AC_DroneShowManager, _params.led_specs[0].blue_gain, 1.0f),
+
+    // @Param: LED0_WGAIN
+    // @DisplayName: White gain of LED channel 0
+    // @Description: Multiplier applied to the white LED output after RGB-to-RGBW conversion and before gamma correction. Lower this if whites or greys are too bright compared with saturated RGB colors.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED0_WGAIN", 49, AC_DroneShowManager, _params.led_specs[0].white_gain, 1.0f),
+
     // @Param: LED1_TYPE
     // @DisplayName: Assignment of LED channel 1 to a LED output type
     // @Description: Specifies where the output of the main LED light track of the show should be sent for the second physical LED output
@@ -149,6 +181,38 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Increment: 0.01
     // @User: Advanced
     AP_GROUPINFO("LED1_MINBRI", 45, AC_DroneShowManager, _params.led_specs[1].min_brightness, 0.0f),
+
+    // @Param: LED1_RGAIN
+    // @DisplayName: Red gain of LED channel 1
+    // @Description: Multiplier applied to the red LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the red LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED1_RGAIN", 50, AC_DroneShowManager, _params.led_specs[1].red_gain, 1.0f),
+
+    // @Param: LED1_GGAIN
+    // @DisplayName: Green gain of LED channel 1
+    // @Description: Multiplier applied to the green LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the green LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED1_GGAIN", 51, AC_DroneShowManager, _params.led_specs[1].green_gain, 1.0f),
+
+    // @Param: LED1_BGAIN
+    // @DisplayName: Blue gain of LED channel 1
+    // @Description: Multiplier applied to the blue LED output before gamma correction. For RGBW outputs this is applied after RGB-to-RGBW conversion; for RGB outputs this is applied directly to the RGB show color. Use this to calibrate the relative intensity of the blue LED channel.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED1_BGAIN", 52, AC_DroneShowManager, _params.led_specs[1].blue_gain, 1.0f),
+
+    // @Param: LED1_WGAIN
+    // @DisplayName: White gain of LED channel 1
+    // @Description: Multiplier applied to the white LED output after RGB-to-RGBW conversion and before gamma correction. Lower this if whites or greys are too bright compared with saturated RGB colors.
+    // @Range: 0 4
+    // @Increment: 0.01
+    // @User: Advanced
+    AP_GROUPINFO("LED1_WGAIN", 53, AC_DroneShowManager, _params.led_specs[1].white_gain, 1.0f),
 
     // @Param: MODE_BOOT
     // @DisplayName: Conditions for entering show mode
@@ -359,7 +423,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MAX_ESC_ERR", 39, AC_DroneShowManager, _params.max_esc_error_rate_pcnt, DEFAULT_MAX_ESC_ERROR_RATE_PCNT),
 
-    // Currently used max parameter ID: 39; update this if you add more parameters.
+    // Currently used max parameter ID: 53; update this if you add more parameters.
     // Note that the max parameter ID may appear in the middle of the above list.
 
     AP_GROUPEND
