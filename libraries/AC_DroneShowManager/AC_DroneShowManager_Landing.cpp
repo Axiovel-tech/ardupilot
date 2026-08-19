@@ -26,7 +26,7 @@ PostAction AC_DroneShowManager::get_action_at_end_of_show() const
     }
 }
 
-bool AC_DroneShowManager::get_landing_position_NEU_cm(Vector3f& pos)
+bool AC_DroneShowManager::get_landing_position_NED_m(Vector3p& pos)
 {
     sb_trajectory_t* trajectory;
     sb_trajectory_player_t player;
@@ -70,7 +70,7 @@ bool AC_DroneShowManager::get_landing_position_NEU_cm(Vector3f& pos)
     end.y = end_with_yaw.y;
     end.z = end_with_yaw.z;
     _show_coordinate_system.convert_show_to_global_coordinate(end, loc);
-    return loc.get_vector_from_origin_NEU(pos);
+    return loc.get_vector_from_origin_NED_m(pos);
 }
 
 float AC_DroneShowManager::get_landing_speed_m_sec() const {

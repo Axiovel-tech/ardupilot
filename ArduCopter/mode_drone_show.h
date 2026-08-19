@@ -110,17 +110,17 @@ private:
     // takeoff in the show trajectory is slower.
     bool _altitude_locked_above_takeoff_altitude;
 
-    // Intended landing position of the show trajectory, in NEU cm relative to
+    // Intended landing position of the show trajectory, in NED m relative to
     // the EKF origin; valid only if _landing_target_valid is set. Captured
     // when the landing stage starts at the end of a show.
-    Vector3f _landing_target_neu_cm;
+    Vector3p _landing_target_ned_m;
 
-    // Stores whether _landing_target_neu_cm holds a valid landing target
+    // Stores whether _landing_target_ned_m holds a valid landing target
     bool _landing_target_valid;
 
-    // Altitude of the pre-descent hold above the EKF origin, in NEU cm; the
-    // gated descent may only start once this altitude has been reached
-    float _landing_hold_z_cm;
+    // Down-axis coordinate of the pre-descent hold relative to the EKF origin,
+    // in NED m; the gated descent may only start once this altitude is reached.
+    postype_t _landing_hold_d_m;
 
     // Stores whether the landing stage has started the actual descent. When
     // the XY error gate is enabled, the landing stage first holds position

@@ -210,13 +210,13 @@ public:
     bool get_desired_global_position_at_seconds(float time, Location& loc) WARN_IF_UNUSED;
 
     // Returns the position where the show trajectory intends the drone to
-    // land, in NEU centimeters relative to the EKF origin. This is the
+    // land, in NED meters relative to the EKF origin. This is the
     // trajectory evaluated at its end, so it already includes the adjustment
     // made for circular trajectories when the corresponding show option is
     // enabled. Used to anchor the post-show landing to the intended landing
     // point instead of the incidental stopping point of the position
     // controller.
-    bool get_landing_position_NEU_cm(Vector3f& pos) WARN_IF_UNUSED;
+    bool get_landing_position_NED_m(Vector3p& pos) WARN_IF_UNUSED;
 
     // Returns the maximum allowed horizontal distance from the intended
     // landing position before the post-show landing may start descending,

@@ -819,7 +819,7 @@ bool ModeDroneShow::performing_completed() const
 // Never anchor the landing to a target farther than this from the current
 // position; a larger distance indicates a mismatch between the trajectory and
 // the actual flight, and the safest course of action is to land in place.
-static constexpr float LANDING_TARGET_SANITY_DISTANCE_CM = 500.0f;
+static constexpr float LANDING_TARGET_SANITY_DISTANCE_M = 5.0f;
 
 // Repositioning during the descent gate must happen with ground clearance.
 // If the drone is closer than this to the intended landing altitude while
@@ -827,7 +827,7 @@ static constexpr float LANDING_TARGET_SANITY_DISTANCE_CM = 500.0f;
 // climbing: a climb commanded at or just after ground contact is a
 // touch-and-go hazard around docking hardware. Deliberate retry-after-miss
 // can be added later as an explicit, separately tested policy.
-static constexpr float LANDING_GATE_MIN_CLEARANCE_CM = 70.0f;
+static constexpr float LANDING_GATE_MIN_CLEARANCE_M = 0.7f;
 
 // starts the landing phase. When at_show_landing_target is set (used at the
 // end of a show), the landing is anchored to the intended landing position of
@@ -844,18 +844,18 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
     _landing_descent_started = false;
 
     if (at_show_landing_target) {
-        Vector3f target;
-        if (show_manager->get_landing_position_NEU_cm(target)) {
-            const Vector3f& position = inertial_nav.get_position_neu_cm();
-            float distance_cm = Vector2f(target.x - position.x, target.y - position.y).length();
-            if (distance_cm > LANDING_TARGET_SANITY_DISTANCE_CM) {
+        Vector3p target_ned_m;
+        if (show_manager->get_landing_position_NED_m(target_ned_m)) {
+            const Vector3p& position_ned_m = pos_control->get_pos_estimate_NED_m();
+            const float distance_m = (target_ned_m.xy() - position_ned_m.xy()).length();
+            if (distance_m > LANDING_TARGET_SANITY_DISTANCE_M) {
                 gcs().send_text(
                     MAV_SEVERITY_WARNING, "Landing target %.1fm away, landing in place",
-                    distance_cm * 0.01f
+                    static_cast<double>(distance_m)
                 );
 #if AP_FENCE_ENABLED
             } else if (!copter.fence.check_horizontal_destination_within_fence(
-                Location(target, Location::AltFrame::ABOVE_ORIGIN)
+                Location::from_ekf_offset_NED_m(target_ned_m, Location::AltFrame::ABOVE_ORIGIN)
             )) {
                 // never anchor the descent to a point outside the fence; this
                 // covers the ungated path too, where no guided-mode fence
@@ -867,7 +867,7 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
                 gcs().send_text(MAV_SEVERITY_WARNING, "Landing target outside fence, landing in place");
 #endif
             } else {
-                _landing_target_neu_cm = target;
+                _landing_target_ned_m = target_ned_m;
                 _landing_target_valid = true;
             }
         }
@@ -877,12 +877,9 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
         _landing_target_valid && show_manager->get_landing_max_xy_error_m() > 0 &&
         !copter.ap.land_complete
     ) {
-        const Vector3f& position = inertial_nav.get_position_neu_cm();
-        float error_cm = Vector2f(
-            _landing_target_neu_cm.x - position.x,
-            _landing_target_neu_cm.y - position.y
-        ).length();
-        float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
+        const Vector3p& position_ned_m = pos_control->get_pos_estimate_NED_m();
+        const float error_m = (_landing_target_ned_m.xy() - position_ned_m.xy()).length();
+        const float max_error_m = show_manager->get_landing_max_xy_error_m();
         // Ground clearance is measured above home -- set at arming on this
         // drone's own pad -- matching the other altitude gates in this mode
         // (takeoff_completed(), the pyro gate). The EKF origin is not a
@@ -891,24 +888,24 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
         // either, whose altitude may be well above the pad (shows ending
         // with clearance). If the altitude cannot be resolved, stay on the
         // conservative side and treat the clearance as zero (never climb).
-        int32_t clearance_cm = 0;
-        if (!copter.current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, clearance_cm)) {
-            clearance_cm = 0;
+        float clearance_m = 0.0f;
+        if (!copter.current_loc.get_alt_m(Location::AltFrame::ABOVE_HOME, clearance_m)) {
+            clearance_m = 0.0f;
         }
 
-        if (error_cm <= max_error_cm) {
+        if (error_m <= max_error_m) {
             // Already within the margin: descend right away, anchored to the
             // intended landing position. Holding first would climb ground-
             // ending trajectories at least a metre for nothing.
             landing_start_descent();
-        } else if (clearance_cm < LANDING_GATE_MIN_CLEARANCE_CM) {
+        } else if (clearance_m < LANDING_GATE_MIN_CLEARANCE_M) {
             // Outside the margin but too close to the ground to reposition
             // safely: never climb from (near) ground contact. Land in place
             // without the anchor so the descent does not drag the vehicle
             // laterally along the ground towards the target.
             gcs().send_text(
                 MAV_SEVERITY_WARNING, "Landing %.2fm off target, landing in place",
-                error_cm * 0.01f
+                static_cast<double>(error_m)
             );
             _landing_target_valid = false;
             landing_start_descent();
@@ -919,22 +916,15 @@ void ModeDroneShow::landing_start(bool at_show_landing_target)
             // has already declared a landing, holding is pointless (guided
             // ground-handles while landed), so we skip straight to the
             // descent in that case.
-            Vector3f hold_target = _landing_target_neu_cm;
+            Vector3p hold_target_ned_m = _landing_target_ned_m;
 
             // Hold at the current altitude, but never below 1 m above the
             // intended landing point so that the repositioning happens with
             // ground clearance
-            hold_target.z = MAX(position.z, _landing_target_neu_cm.z + 100.0f);
-            _landing_hold_z_cm = hold_target.z;
+            hold_target_ned_m.z = MIN(position_ned_m.z, _landing_target_ned_m.z - 1.0);
+            _landing_hold_d_m = hold_target_ned_m.z;
 
             copter.mode_guided.init(true);
-            // ArduPilot 4.7's guided position API takes NED metres; the show
-            // mode still stores its landing state in legacy NEU centimetres.
-            const Vector3p hold_target_ned_m {
-                hold_target.x * 0.01,
-                hold_target.y * 0.01,
-                -hold_target.z * 0.01
-            };
             if (!copter.mode_guided.set_pos_NED_m(hold_target_ned_m)) {
                 // The hold target was rejected, which can only mean it
                 // violates the fence. Do not anchor the descent to a point
@@ -960,12 +950,7 @@ void ModeDroneShow::landing_start_descent()
         // Anchor the descent to the intended landing position instead of the
         // stopping point inherited from the previous controller state so we
         // land as close to our destination as possible
-        pos_control->set_pos_desired_NE_m(
-            Vector2p(
-                _landing_target_neu_cm.x * 0.01,
-                _landing_target_neu_cm.y * 0.01
-            )
-        );
+        pos_control->set_pos_desired_NE_m(_landing_target_ned_m.xy());
     }
 }
 
@@ -988,26 +973,23 @@ void ModeDroneShow::landing_run()
 
         copter.mode_guided.run();
 
-        const Vector3f& position = inertial_nav.get_position_neu_cm();
-        float error_cm = Vector2f(
-            _landing_target_neu_cm.x - position.x,
-            _landing_target_neu_cm.y - position.y
-        ).length();
-        float max_error_cm = show_manager->get_landing_max_xy_error_m() * 100.0f;
-        float max_wait_msec = show_manager->get_landing_max_wait_sec() * 1000.0f;
+        const Vector3p& position_ned_m = pos_control->get_pos_estimate_NED_m();
+        const float error_m = (_landing_target_ned_m.xy() - position_ned_m.xy()).length();
+        const float max_error_m = show_manager->get_landing_max_xy_error_m();
+        const float max_wait_msec = show_manager->get_landing_max_wait_sec() * 1000.0f;
 
         // The descent may start only when the XY error has converged AND the
         // hold altitude has been reached, so that the lateral correction
         // finishes with proper ground clearance before the descent begins
-        bool xy_converged = error_cm <= max_error_cm;
-        bool hold_altitude_reached = position.z >= _landing_hold_z_cm - 30.0f;
+        const bool xy_converged = error_m <= max_error_m;
+        const bool hold_altitude_reached = position_ned_m.z <= _landing_hold_d_m + 0.3;
 
         if (xy_converged && hold_altitude_reached) {
             landing_start_descent();
         } else if (get_elapsed_time_since_last_stage_change_msec() >= max_wait_msec) {
             gcs().send_text(
                 MAV_SEVERITY_WARNING, "Landing with %.2fm XY error after timeout",
-                error_cm * 0.01f
+                static_cast<double>(error_m)
             );
             landing_start_descent();
         }
