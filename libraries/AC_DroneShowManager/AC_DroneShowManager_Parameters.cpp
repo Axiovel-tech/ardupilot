@@ -386,7 +386,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: LAND_XY_ERR
     // @DisplayName: Maximum XY error to start the post-show descent
-    // @Description: Maximum allowed horizontal distance between the estimated position of the drone and the intended landing position of the show trajectory before the post-show landing is allowed to start descending. While the error is larger, the drone holds position above the intended landing position. Zero disables the gate and the drone starts descending immediately, wherever it is. Useful when the drone must land accurately, e.g. on a docking or charging pad.
+    // @Description: Maximum allowed horizontal distance between the estimated position of the drone and the intended landing position of the show trajectory before the post-show landing is allowed to start descending. While the error is larger, the drone moves towards the intended landing position while holding its current altitude. Zero disables the gate and the drone starts descending immediately, wherever it is. Useful when the drone must land accurately, e.g. on a docking or charging pad.
     // @Range: 0 2
     // @Increment: 0.05
     // @Units: m
@@ -395,7 +395,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: LAND_WAIT
     // @DisplayName: Maximum time to wait before the post-show descent
-    // @Description: Maximum time the drone may spend holding position above the intended landing position, waiting for the horizontal error to drop below SHOW_LAND_XY_ERR, before it starts descending anyway. Only used when SHOW_LAND_XY_ERR is positive.
+    // @Description: Maximum time the drone may spend holding altitude and moving towards the intended landing position, waiting for the horizontal error to drop below SHOW_LAND_XY_ERR, before it starts descending anyway. Only used when SHOW_LAND_XY_ERR is positive.
     // @Range: 0 60
     // @Increment: 1
     // @Units: s
