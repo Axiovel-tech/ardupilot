@@ -469,6 +469,107 @@ TEST(Control, test_control)
     EXPECT_FLOAT_EQ(velxy.y, 0.0);
 }
 
+TEST(Control, AccelCorrectionPriorityXY)
+{
+    const float accel_max = 5.0f;
+
+    // Correction is primary; a parallel trajectory receives only the remaining budget.
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(3.0f, 0.0f), Vector2f(4.0f, 0.0f), accel_max),
+              Vector2f(5.0f, 0.0f));
+
+    // Allocation is conservative for other directions: admitted trajectory
+    // magnitude never exceeds the scalar budget left by correction.
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(3.0f, 0.0f), Vector2f(0.0f, 4.0f), accel_max),
+              Vector2f(3.0f, 2.0f));
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(3.0f, 0.0f), Vector2f(-4.0f, 0.0f), accel_max),
+              Vector2f(1.0f, 0.0f));
+
+    // Unsaturated trajectory demand passes through unchanged.
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(1.0f, 0.0f), Vector2f(2.0f, 1.0f), accel_max),
+              Vector2f(3.0f, 1.0f));
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(), Vector2f(3.0f, 4.0f), accel_max),
+              Vector2f(3.0f, 4.0f));
+
+    // Correction at or beyond the envelope receives full priority and all
+    // trajectory acceleration is shed. The final controller limiter owns any
+    // required correction saturation and anti-windup.
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(5.0f, 0.0f), Vector2f(0.0f, 4.0f), accel_max),
+              Vector2f(5.0f, 0.0f));
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(6.0f, 0.0f), Vector2f(-4.0f, 0.0f), accel_max),
+              Vector2f(6.0f, 0.0f));
+
+    // A non-positive envelope cannot safely admit secondary acceleration.
+    EXPECT_EQ(allocate_accel_correction_priority(Vector2f(1.0f, 2.0f), Vector2f(3.0f, 4.0f), 0.0f),
+              Vector2f(1.0f, 2.0f));
+
+    // Property coverage across relative directions and primary magnitudes.
+    for (uint16_t correction_angle_deg = 0; correction_angle_deg < 360; correction_angle_deg += 15) {
+        const float correction_angle_rad = radians(correction_angle_deg);
+        for (uint16_t trajectory_angle_deg = 0; trajectory_angle_deg < 360; trajectory_angle_deg += 15) {
+            const float trajectory_angle_rad = radians(trajectory_angle_deg);
+            for (const float correction_magnitude : {0.0f, 1.0f, 4.9f, 5.0f, 6.0f}) {
+                const Vector2f correction(cosf(correction_angle_rad) * correction_magnitude,
+                                          sinf(correction_angle_rad) * correction_magnitude);
+                const Vector2f trajectory(cosf(trajectory_angle_rad) * 10.0f,
+                                          sinf(trajectory_angle_rad) * 10.0f);
+                const Vector2f combined = allocate_accel_correction_priority(correction, trajectory, accel_max);
+
+                if (correction_magnitude <= accel_max) {
+                    EXPECT_LE(combined.length(), accel_max + 1.0e-5f);
+                    EXPECT_LE((combined - correction).length(), accel_max - correction_magnitude + 1.0e-5f);
+                } else {
+                    EXPECT_EQ(combined, correction);
+                }
+            }
+        }
+    }
+}
+
+TEST(Control, AccelCorrectionPriorityAxis)
+{
+    constexpr float accel_min = -4.0f;
+    constexpr float accel_max = 6.0f;
+
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(2.0f, 10.0f, accel_min, accel_max), 6.0f);
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(-2.0f, -10.0f, accel_min, accel_max), -4.0f);
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(2.0f, -1.0f, accel_min, accel_max), 1.0f);
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(0.0f, 3.0f, accel_min, accel_max), 3.0f);
+
+    // At either correction bound no trajectory authority remains, even if the
+    // requested trajectory points in the opposite direction.
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(6.0f, -10.0f, accel_min, accel_max), 6.0f);
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(-4.0f, 10.0f, accel_min, accel_max), -4.0f);
+
+    // Out-of-envelope correction is never clipped by the allocator.
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(7.0f, -10.0f, accel_min, accel_max), 7.0f);
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(-5.0f, 10.0f, accel_min, accel_max), -5.0f);
+
+    // Invalid bounds admit no trajectory acceleration.
+    EXPECT_FLOAT_EQ(allocate_accel_correction_priority(2.0f, 10.0f, 0.0f, 0.0f), 2.0f);
+
+    // Admitted trajectory authority decreases monotonically as correction
+    // approaches either asymmetric limit.
+    float previous_positive_admission = accel_max;
+    for (float correction = 0.0f; correction <= accel_max; correction += 0.25f) {
+        const float combined = allocate_accel_correction_priority(correction, 100.0f, accel_min, accel_max);
+        const float admission = combined - correction;
+        EXPECT_LE(admission, previous_positive_admission + 1.0e-6f);
+        EXPECT_LE(combined, accel_max);
+        EXPECT_GE(combined, accel_min);
+        previous_positive_admission = admission;
+    }
+
+    float previous_negative_admission = -accel_min;
+    for (float correction = 0.0f; correction >= accel_min; correction -= 0.25f) {
+        const float combined = allocate_accel_correction_priority(correction, -100.0f, accel_min, accel_max);
+        const float admission = fabsf(combined - correction);
+        EXPECT_LE(admission, previous_negative_admission + 1.0e-6f);
+        EXPECT_LE(combined, accel_max);
+        EXPECT_GE(combined, accel_min);
+        previous_negative_admission = admission;
+    }
+}
+
 // catch floating point exceptions
 sigjmp_buf avert_your_eyes_children;
 static void _tc_sig_fpe(int signum)

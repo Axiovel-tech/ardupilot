@@ -305,6 +305,7 @@ void ModeGuided::posvelaccel_control_start()
 {
     // set guided_mode to position, velocity and acceleration controller
     guided_mode = SubMode::PosVelAccel;
+    guided_pva_pre_shaped = false;
 
     // initialise position controller
     pva_control_start();
@@ -640,11 +641,23 @@ bool ModeGuided::set_pos_vel_accel_NED_m(const Vector3p& pos_ned_m, const Vector
     guided_is_terrain_alt = false;
     guided_vel_target_ned_ms = vel_ned_ms;
     guided_accel_target_ned_mss = accel_ned_mss;
+    guided_pva_pre_shaped = false;
 
 #if HAL_LOGGING_ENABLED
     // log target
     copter.Log_Write_Guided_Position_Target(guided_mode, guided_pos_target_ned_m, guided_is_terrain_alt, guided_vel_target_ned_ms, guided_accel_target_ned_mss);
 #endif
+    return true;
+}
+
+// Sets a coherent position, velocity, and acceleration reference that was
+// already shaped by an external trajectory generator.
+bool ModeGuided::set_preshaped_pos_vel_accel_NED_m(const Vector3p& pos_ned_m, const Vector3f& vel_ned_ms, const Vector3f& accel_ned_mss, bool use_yaw, float yaw_rad, bool use_yaw_rate, float yaw_rate_rads, bool relative_yaw)
+{
+    if (!set_pos_vel_accel_NED_m(pos_ned_m, vel_ned_ms, accel_ned_mss, use_yaw, yaw_rad, use_yaw_rate, yaw_rate_rads, relative_yaw)) {
+        return false;
+    }
+    guided_pva_pre_shaped = true;
     return true;
 }
 
@@ -940,7 +953,9 @@ void ModeGuided::posvelaccel_control_run()
         // set the current commanded xy pos to the target pos
         guided_pos_target_ned_m.xy() = pos_control->get_pos_desired_NED_m().xy();
     }
-    pos_control->input_pos_vel_accel_NE_m(guided_pos_target_ned_m.xy(), guided_vel_target_ned_ms.xy(), guided_accel_target_ned_mss.xy(), false);
+    if (!guided_pva_pre_shaped) {
+        pos_control->input_pos_vel_accel_NE_m(guided_pos_target_ned_m.xy(), guided_vel_target_ned_ms.xy(), guided_accel_target_ned_mss.xy(), false);
+    }
     if (!stabilizing_vel_NE()) {
         // set position and velocity errors to zero
         pos_control->NE_stop_vel_stabilisation();
@@ -954,13 +969,20 @@ void ModeGuided::posvelaccel_control_run()
         INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
     }
 
-    float pz = guided_pos_target_ned_m.z;
-    pos_control->input_pos_vel_accel_D_m(pz, guided_vel_target_ned_ms.z, guided_accel_target_ned_mss.z, false);
-    guided_pos_target_ned_m.z = pz;
+    if (guided_pva_pre_shaped) {
+        pos_control->set_pos_vel_accel_NED_m(guided_pos_target_ned_m, guided_vel_target_ned_ms, guided_accel_target_ned_mss);
+        update_pos_vel_accel_xy(guided_pos_target_ned_m.xy(), guided_vel_target_ned_ms.xy(), guided_accel_target_ned_mss.xy(), G_Dt, Vector2f(), Vector2f(), Vector2f());
+        update_pos_vel_accel(guided_pos_target_ned_m.z, guided_vel_target_ned_ms.z, guided_accel_target_ned_mss.z, G_Dt, 0.0, 0.0, 0.0);
+    } else {
+        float pz = guided_pos_target_ned_m.z;
+        pos_control->input_pos_vel_accel_D_m(pz, guided_vel_target_ned_ms.z, guided_accel_target_ned_mss.z, false);
+        guided_pos_target_ned_m.z = pz;
+    }
 
     // run position controllers
-    pos_control->NE_update_controller();
-    pos_control->D_update_controller();
+    const AccelTargetAllocation accel_allocation = guided_pva_pre_shaped ? AccelTargetAllocation::CorrectionPriority : AccelTargetAllocation::Legacy;
+    pos_control->NE_update_controller(accel_allocation);
+    pos_control->D_update_controller(accel_allocation);
 
     // call attitude controller with auto yaw
     attitude_control->input_thrust_vector_heading(pos_control->get_thrust_vector(), auto_yaw.get_heading());

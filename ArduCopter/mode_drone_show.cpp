@@ -1209,13 +1209,22 @@ bool ModeDroneShow::send_guided_mode_command_during_performance()
                 const Vector3f accel_ned_mss {
                     command.acc.x * 0.01f, command.acc.y * 0.01f, -command.acc.z * 0.01f
                 };
-                copter.mode_guided.set_pos_vel_accel_NED_m(
+                if (!copter.mode_guided.set_preshaped_pos_vel_accel_NED_m(
                     pos_ned_m, vel_ned_ms, accel_ned_mss,
                     /* use_yaw = */ true,
                     cd_to_rad(command.yaw_cd),
                     /* use_yaw_rate = */ true,
-                    cd_to_rad(command.yaw_rate_cds)
-                );
+                    cd_to_rad(command.yaw_rate_cds),
+                    /* yaw_relative = */ false
+                )) {
+                    // Stop advancing the last accepted trajectory target if
+                    // Guided rejects this one (for example at a fence).
+                    if (show_manager->get_current_relative_position_NED_origin(pos)) {
+                        zero.zero();
+                        copter.mode_guided.set_pos_vel_accel_NED_m(pos.topostype(), zero, zero);
+                    }
+                    return false;
+                }
             }
 
             show_manager->notify_guided_mode_command_sent(command);
