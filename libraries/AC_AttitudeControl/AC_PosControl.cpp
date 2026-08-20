@@ -694,7 +694,7 @@ bool AC_PosControl::NE_is_active() const
 
 // Uses P and PID controllers to generate corrections which are added to feedforward velocity/acceleration.
 // Requires all desired targets to be pre-set using the input_* or set_* methods.
-void AC_PosControl::NE_update_controller()
+void AC_PosControl::NE_update_controller(AccelTargetAllocation accel_allocation)
 {
     // check for ekf xy position reset
     NE_handle_ekf_reset();
@@ -755,13 +755,21 @@ void AC_PosControl::NE_update_controller()
 
     _ne_control_scale_factor = 1.0;
 
-    // pass the correction acceleration to the target acceleration output
-    _accel_target_ned_mss.xy() = accel_target_ne_mss;
-    _accel_target_ned_mss.xy() += _accel_desired_ned_mss.xy() + _accel_offset_ned_mss.xy();
-
     // limit acceleration using maximum lean angles
     const float angle_max_rad = MIN(_attitude_control.get_althold_lean_angle_max_rad(), get_lean_angle_max_rad());
     const float accel_max_mss = angle_rad_to_accel_mss(angle_max_rad);
+
+    // Offsets are controller/safety corrections and retain priority over the
+    // externally supplied trajectory acceleration. The allocator never clips
+    // correction, so the native final limiter below remains the sole source of
+    // saturation feedback for PID anti-windup.
+    accel_target_ne_mss += _accel_offset_ned_mss.xy();
+    if (accel_allocation == AccelTargetAllocation::CorrectionPriority) {
+        _accel_target_ned_mss.xy() = allocate_accel_correction_priority(accel_target_ne_mss, _accel_desired_ned_mss.xy(), accel_max_mss);
+    } else {
+        _accel_target_ned_mss.xy() = accel_target_ne_mss + _accel_desired_ned_mss.xy();
+    }
+
     // Save unbounded target for use in "limited" check (not unit-consistent with z!)
     _limit_vector_ned.xy() = _accel_target_ned_mss.xy();
     if (!limit_accel_xy(_vel_desired_ned_ms.xy(), _accel_target_ned_mss.xy(), accel_max_mss)) {
@@ -1069,7 +1077,7 @@ bool AC_PosControl::D_is_active() const
 // Computes output acceleration based on position and velocity errors using PID correction.
 // Feedforward velocity and acceleration are combined with corrections to produce a smooth vertical command.
 // Desired position, velocity, and acceleration must be set before calling.
-void AC_PosControl::D_update_controller()
+void AC_PosControl::D_update_controller(AccelTargetAllocation accel_allocation)
 {
     // check for ekf z-axis position reset
     D_handle_ekf_reset();
@@ -1105,11 +1113,25 @@ void AC_PosControl::D_update_controller()
     // Velocity Controller
 
     // PID controller: convert velocity error to acceleration
-    _accel_target_ned_mss.z = _pid_vel_d_m.update_all(_vel_target_ned_ms.z, _vel_estimate_ned_ms.z, _dt_s, _motors.limit.throttle_lower, _motors.limit.throttle_upper);
-    _accel_target_ned_mss.z *= AP::ahrs().getControlScaleZ();
+    float accel_correction_d_mss = _pid_vel_d_m.update_all(_vel_target_ned_ms.z, _vel_estimate_ned_ms.z, _dt_s, _motors.limit.throttle_lower, _motors.limit.throttle_upper);
+    accel_correction_d_mss *= AP::ahrs().getControlScaleZ();
+    accel_correction_d_mss += _accel_offset_ned_mss.z + _accel_terrain_d_mss;
 
-    // add feed forward component
-    _accel_target_ned_mss.z += _accel_desired_ned_mss.z + _accel_offset_ned_mss.z + _accel_terrain_d_mss;
+    // The configured vertical acceleration limit is a trajectory-shaping
+    // envelope, not a fixed physical thrust limit. Use it only to decide how
+    // much lower-priority trajectory acceleration to admit. Motor saturation
+    // below remains the physical limit and anti-windup source.
+    if (accel_allocation == AccelTargetAllocation::CorrectionPriority) {
+        const float accel_max_d_mss = D_get_max_accel_mss();
+        _accel_target_ned_mss.z = allocate_accel_correction_priority(
+            accel_correction_d_mss,
+            _accel_desired_ned_mss.z,
+            -accel_max_d_mss,
+            constrain_float(accel_max_d_mss, 0.0, 7.5)
+        );
+    } else {
+        _accel_target_ned_mss.z = accel_correction_d_mss + _accel_desired_ned_mss.z;
+    }
 
     // Acceleration Controller
 

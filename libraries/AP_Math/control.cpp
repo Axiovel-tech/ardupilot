@@ -27,6 +27,38 @@
 // control default definitions
 #define CORNER_ACCELERATION_RATIO   1.0/safe_sqrt(2.0)   // acceleration reduction to enable zero overshoot corners
 
+Vector2f allocate_accel_correction_priority(const Vector2f& correction, const Vector2f& trajectory, float accel_max)
+{
+    if (!is_positive(accel_max)) {
+        return correction;
+    }
+
+    const float trajectory_budget = accel_max - correction.length();
+    if (!is_positive(trajectory_budget)) {
+        return correction;
+    }
+
+    Vector2f allocated_trajectory = trajectory;
+    allocated_trajectory.limit_length(trajectory_budget);
+    return correction + allocated_trajectory;
+}
+
+float allocate_accel_correction_priority(float correction, float trajectory, float accel_min, float accel_max)
+{
+    if (!is_negative(accel_min) || !is_positive(accel_max) || correction < accel_min || correction > accel_max) {
+        return correction;
+    }
+
+    const float correction_limit = is_negative(correction) ? -accel_min : accel_max;
+    const float remaining_fraction = 1.0f - fabsf(correction) / correction_limit;
+    const float allocated_trajectory = constrain_float(
+        trajectory,
+        accel_min * remaining_fraction,
+        accel_max * remaining_fraction
+    );
+    return correction + allocated_trajectory;
+}
+
 // Projects velocity forward in time using acceleration, constrained by directional limit.
 // - If `limit` is non-zero, it defines a direction in which acceleration is constrained.
 // - The `vel_error` value defines the direction of velocity error (its sign matters, not its magnitude).

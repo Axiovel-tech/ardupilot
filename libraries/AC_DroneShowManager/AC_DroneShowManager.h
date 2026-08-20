@@ -338,14 +338,6 @@ public:
     // Returns the velocity feed-forward gain factor to use during velocity control
     float get_velocity_feedforward_gain() const { return _params.velocity_feedforward_gain; }
 
-    // Returns the acceleration feed-forward gain factor to use during acceleration control
-    float get_acceleration_feedforward_gain() const { return _params.acceleration_feedforward_gain; }
-
-    // Returns the largest fraction of the WPNAV acceleration envelope that the show
-    // feed-forward is allowed to consume; the remainder is reserved for the position
-    // controller's corrective term.
-    float get_acceleration_feedforward_max_fraction() const { return _params.acceleration_feedforward_max_fraction; }
-
     // Handles a MAVLink user command forwarded to the drone show manager by the central MAVLink handler
     MAV_RESULT handle_command_int_packet(const mavlink_command_int_t &packet);
 
@@ -669,13 +661,6 @@ private:
 
         // Velocity feed-forward gain when velocity control is being used.
         AP_Float velocity_feedforward_gain;
-
-        // Acceleration feed-forward gain when acceleration control is being used.
-        AP_Float acceleration_feedforward_gain;
-
-        // Largest fraction of the WPNAV acceleration envelope that the show
-        // feed-forward may consume.
-        AP_Float acceleration_feedforward_max_fraction;
 
         // Takeoff altitude
         AP_Float takeoff_altitude_m;

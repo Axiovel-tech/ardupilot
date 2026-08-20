@@ -182,7 +182,7 @@ public:
     // Runs the NE-axis position controller, computing output acceleration from position and velocity errors.
     // Uses P and PID controllers to generate corrections which are added to feedforward velocity/acceleration.
     // Requires all desired targets to be pre-set using the input_* or set_* methods.
-    void NE_update_controller();
+    void NE_update_controller(AccelTargetAllocation accel_allocation = AccelTargetAllocation::Legacy);
 
     ///
     /// Vertical position controller
@@ -290,7 +290,7 @@ public:
     // Computes output acceleration based on position and velocity errors using PID correction.
     // Feedforward velocity and acceleration are combined with corrections to produce a smooth vertical command.
     // Desired position, velocity, and acceleration must be set before calling.
-    void D_update_controller();
+    void D_update_controller(AccelTargetAllocation accel_allocation = AccelTargetAllocation::Legacy);
 
 
 
