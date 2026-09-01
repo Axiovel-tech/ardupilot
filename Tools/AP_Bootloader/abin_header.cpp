@@ -48,85 +48,93 @@ bool parse_md5(const char *text, uint8_t *md5)
     return true;
 }
 
-bool read_header_line(FIL &file, char *line, uint8_t line_capacity,
-                      uint16_t &header_size)
+ABinValidationResult read_header_line(FIL &file, char *line, uint8_t line_capacity,
+                                      uint16_t &header_size)
 {
     uint8_t line_length = 0;
     while (header_size < MAX_HEADER_SIZE) {
         UINT bytes_read = 0;
         char value;
-        if (f_read(&file, &value, 1, &bytes_read) != FR_OK || bytes_read != 1) {
-            return false;
+        if (f_read(&file, &value, 1, &bytes_read) != FR_OK) {
+            return ABinValidationResult::IO_ERROR;
+        }
+        if (bytes_read != 1) {
+            return ABinValidationResult::INVALID;
         }
         header_size++;
         if (value == '\n') {
             line[line_length] = '\0';
-            return true;
+            return ABinValidationResult::VALID;
         }
         if (line_length >= line_capacity - 1U) {
-            return false;
+            return ABinValidationResult::INVALID;
         }
         if (value != '\r') {
             line[line_length++] = value;
         }
     }
-    return false;
+    return ABinValidationResult::INVALID;
 }
 
-bool set_body_bounds(FIL &file, ABinHeader &header)
+ABinValidationResult set_body_bounds(FIL &file, ABinHeader &header)
 {
     header.body_offset = f_tell(&file);
     const FSIZE_t file_size = f_size(&file);
     if (file_size < header.body_offset) {
-        return false;
+        return ABinValidationResult::INVALID;
     }
     const FSIZE_t body_size = file_size - header.body_offset;
     if (body_size == 0 || body_size > UINT32_MAX) {
-        return false;
+        return ABinValidationResult::INVALID;
     }
     header.body_size = body_size;
-    return header.has_md5;
+    return header.has_md5 ? ABinValidationResult::VALID : ABinValidationResult::INVALID;
 }
 
-bool accept_header_line(const char *line, ABinHeader &header)
+ABinValidationResult accept_header_line(const char *line, ABinHeader &header)
 {
     if (strncmp(line, "MD5: ", 5) != 0) {
-        return true;
+        return ABinValidationResult::VALID;
     }
     if (header.has_md5 || !parse_md5(&line[5], header.expected_md5)) {
-        return false;
+        return ABinValidationResult::INVALID;
     }
     header.has_md5 = true;
-    return true;
+    return ABinValidationResult::VALID;
 }
 
-bool parse_header(FIL &file, ABinHeader &header)
+ABinValidationResult parse_header(FIL &file, ABinHeader &header)
 {
     char line[MAX_HEADER_LINE_SIZE] {};
     uint16_t header_size = 0;
-    while (read_header_line(file, line, sizeof(line), header_size)) {
+    while (true) {
+        const ABinValidationResult read_result =
+            read_header_line(file, line, sizeof(line), header_size);
+        if (read_result != ABinValidationResult::VALID) {
+            return read_result;
+        }
         if (strcmp(line, "--") == 0) {
             return set_body_bounds(file, header);
         }
-        if (!accept_header_line(line, header)) {
-            return false;
+        const ABinValidationResult line_result = accept_header_line(line, header);
+        if (line_result != ABinValidationResult::VALID) {
+            return line_result;
         }
     }
-    return false;
 }
 
 } // namespace
 
-bool abin_open_and_parse(const char *path, FIL &file, ABinHeader &header)
+ABinValidationResult abin_open_and_parse(const char *path, FIL &file, ABinHeader &header)
 {
     if (f_open(&file, path, FA_READ) != FR_OK) {
-        return false;
+        return ABinValidationResult::IO_ERROR;
     }
-    if (!parse_header(file, header)) {
+    const ABinValidationResult result = parse_header(file, header);
+    if (result != ABinValidationResult::VALID) {
         f_close(&file);
-        return false;
     }
-    return true;
+    return result;
 }
 
 #endif // AP_BOOTLOADER_FLASH_FROM_SD_ENABLED

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "abin_result.h"
 #include "ff.h"
 
 #include <stdint.h>
@@ -11,4 +12,4 @@ struct ABinHeader {
     bool has_md5 = false;
 };
 
-bool abin_open_and_parse(const char *path, FIL &file, ABinHeader &header);
+ABinValidationResult abin_open_and_parse(const char *path, FIL &file, ABinHeader &header);

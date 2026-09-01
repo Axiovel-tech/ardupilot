@@ -1,5 +1,7 @@
 #pragma once
 
+#include "abin_result.h"
+
 #include <stdint.h>
 
 class ABinBodySink {
@@ -9,5 +11,6 @@ public:
     virtual bool finish() = 0;
 };
 
-bool abin_validate(const char *path, uint32_t maximum_image_size, uint16_t board_id);
+ABinValidationResult abin_validate(const char *path, uint32_t maximum_image_size,
+                                   uint16_t board_id);
 bool abin_stream_body(const char *path, ABinBodySink &sink);
