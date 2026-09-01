@@ -40,6 +40,7 @@ jobs:
       # Match ownership to this ephemeral container before checkout traverses
       # nested Git repositories.
       - name: Recover workspace ownership
+        shell: bash
         run: |
           set -euo pipefail
           workspace="$GITHUB_WORKSPACE"

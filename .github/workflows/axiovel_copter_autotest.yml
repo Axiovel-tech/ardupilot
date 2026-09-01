@@ -35,6 +35,7 @@ jobs:
 
     steps:
       - name: Recover workspace ownership
+        shell: bash
         run: |
           set -euo pipefail
           workspace="$GITHUB_WORKSPACE"
@@ -142,6 +143,7 @@ jobs:
 
     steps:
       - name: Recover workspace ownership
+        shell: bash
         run: |
           set -euo pipefail
           workspace="$GITHUB_WORKSPACE"
