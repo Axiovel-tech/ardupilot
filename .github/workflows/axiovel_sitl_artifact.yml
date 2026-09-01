@@ -37,12 +37,17 @@ jobs:
 
     steps:
       # The hardware artifact job deliberately writes as the host runner user.
-      # This job runs in an ephemeral container as root, so Git must trust the
-      # shared bind-mounted checkout before checkout can update submodules.
-      - name: Trust the runner workspace
+      # Match ownership to this ephemeral container before checkout traverses
+      # nested Git repositories.
+      - name: Recover workspace ownership
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          if [[ -z "$workspace" || "$workspace" == / || ! -d "$workspace" ]]; then
+            echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
+            exit 1
+          fi
+          chown -R "$(id -u):$(id -g)" "$workspace"
 
       - uses: actions/checkout@v4
         with:

@@ -34,10 +34,15 @@ jobs:
       options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
 
     steps:
-      - name: Trust the runner workspace
+      - name: Recover workspace ownership
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          if [[ -z "$workspace" || "$workspace" == / || ! -d "$workspace" ]]; then
+            echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
+            exit 1
+          fi
+          chown -R "$(id -u):$(id -g)" "$workspace"
 
       - uses: actions/checkout@v4
         with:
@@ -136,10 +141,15 @@ jobs:
           - AXIOLIGHT-REVB
 
     steps:
-      - name: Trust the runner workspace
+      - name: Recover workspace ownership
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          if [[ -z "$workspace" || "$workspace" == / || ! -d "$workspace" ]]; then
+            echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
+            exit 1
+          fi
+          chown -R "$(id -u):$(id -g)" "$workspace"
 
       - uses: actions/checkout@v4
         with:
