@@ -40,7 +40,9 @@ jobs:
       # This job runs in an ephemeral container as root, so Git must trust the
       # shared bind-mounted checkout before checkout can update submodules.
       - name: Trust the runner workspace
-        run: git config --global --add safe.directory '*'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
 
       - uses: actions/checkout@v4
         with:
