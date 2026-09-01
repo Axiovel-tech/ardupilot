@@ -3,6 +3,7 @@
 #include "AP_HAL_SITL.h"
 #include <AP_HAL_SITL/I2CDevice.h>
 #include "Scheduler.h"
+#include "SDCardOTA.h"
 #include "UARTDriver.h"
 #include <sys/time.h>
 #include <fenv.h>
@@ -223,6 +224,9 @@ void Scheduler::sitl_end_atomic() {
 
 void Scheduler::reboot(bool hold_in_bootloader)
 {
+    if (hold_in_bootloader && SDCardOTA::enabled()) {
+        SDCardOTA::emulate();
+    }
     HAL_SITL::actually_reboot();
     abort();
 }
