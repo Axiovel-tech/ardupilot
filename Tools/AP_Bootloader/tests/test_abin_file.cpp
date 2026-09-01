@@ -14,6 +14,11 @@
 #include <string>
 #include <vector>
 
+uint32_t abin_test_fail_open_calls;
+uint32_t abin_test_fail_read_calls;
+uint32_t abin_test_fail_bulk_read_calls;
+uint32_t abin_test_fail_lseek_calls;
+
 namespace {
 
 constexpr uint16_t BOARD_ID = 1177;
@@ -115,7 +120,7 @@ bool validates(const std::vector<uint8_t> &body, uint32_t maximum_size = IMAGE_S
                uint16_t board_id = BOARD_ID)
 {
     TemporaryFile file(header_for(body), body);
-    return abin_validate(file.name(), maximum_size, board_id);
+    return abin_validate(file.name(), maximum_size, board_id) == ABinValidationResult::VALID;
 }
 
 void test_valid_descriptors()
@@ -140,11 +145,13 @@ void test_header_rejections()
     };
     for (const auto &header : invalid_headers) {
         TemporaryFile file(header, body);
-        CHECK(!abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+        CHECK(abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+              ABinValidationResult::INVALID);
     }
 
     TemporaryFile empty("MD5: d41d8cd98f00b204e9800998ecf8427e\n--\n", {});
-    CHECK(!abin_validate(empty.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(empty.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 }
 
 void test_integrity_rejections()
@@ -154,11 +161,13 @@ void test_integrity_rejections()
     CHECK(!validates(body, IMAGE_SIZE_LIMIT, BOARD_ID + 1U));
 
     TemporaryFile bad_md5("MD5: 00000000000000000000000000000000\n--\n", body);
-    CHECK(!abin_validate(bad_md5.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(bad_md5.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 
     body[0] ^= 1U;
     TemporaryFile stale_md5(header_for(make_body<app_descriptor_unsigned>(5000, 4093)), body);
-    CHECK(!abin_validate(stale_md5.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(stale_md5.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 }
 
 void test_descriptor_rejections()
@@ -169,17 +178,20 @@ void test_descriptor_rejections()
     auto bad_size = body;
     reinterpret_cast<app_descriptor_unsigned *>(&bad_size[offset])->image_size--;
     TemporaryFile bad_size_file(header_for(bad_size), bad_size);
-    CHECK(!abin_validate(bad_size_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(bad_size_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 
     auto bad_crc1 = body;
     reinterpret_cast<app_descriptor_unsigned *>(&bad_crc1[offset])->image_crc1 ^= 1U;
     TemporaryFile bad_crc1_file(header_for(bad_crc1), bad_crc1);
-    CHECK(!abin_validate(bad_crc1_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(bad_crc1_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 
     auto bad_crc2 = body;
     reinterpret_cast<app_descriptor_unsigned *>(&bad_crc2[offset])->image_crc2 ^= 1U;
     TemporaryFile bad_crc2_file(header_for(bad_crc2), bad_crc2);
-    CHECK(!abin_validate(bad_crc2_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(bad_crc2_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 
     auto duplicate = make_body<app_descriptor_unsigned>(4096, 2048);
     const uint8_t signature[] = AP_APP_DESCRIPTOR_SIGNATURE_UNSIGNED;
@@ -189,11 +201,35 @@ void test_descriptor_rejections()
     last_descriptor->image_crc1 = crc32_small(
         0, duplicate.data(), 2048 + offsetof(app_descriptor_unsigned, image_crc1));
     TemporaryFile duplicate_file(header_for(duplicate), duplicate);
-    CHECK(!abin_validate(duplicate_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(duplicate_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
 
     std::vector<uint8_t> absent(4096, 0x5A);
     TemporaryFile absent_file(header_for(absent), absent);
-    CHECK(!abin_validate(absent_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID));
+    CHECK(abin_validate(absent_file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::INVALID);
+}
+
+void test_io_errors()
+{
+    const auto body = make_body<app_descriptor_unsigned>(5000, 4093);
+    TemporaryFile file(header_for(body), body);
+
+    abin_test_fail_open_calls = 1;
+    CHECK(abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::IO_ERROR);
+
+    abin_test_fail_read_calls = 1;
+    CHECK(abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::IO_ERROR);
+
+    abin_test_fail_bulk_read_calls = 1;
+    CHECK(abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::IO_ERROR);
+
+    abin_test_fail_lseek_calls = 1;
+    CHECK(abin_validate(file.name(), IMAGE_SIZE_LIMIT, BOARD_ID) ==
+          ABinValidationResult::IO_ERROR);
 }
 
 class RecordingSink : public ABinBodySink {
@@ -248,6 +284,7 @@ int main()
     test_header_rejections();
     test_integrity_rejections();
     test_descriptor_rejections();
+    test_io_errors();
     test_streaming();
     if (failures != 0) {
         fprintf(stderr, "%d ABin checks failed\n", failures);

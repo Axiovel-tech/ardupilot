@@ -11,6 +11,11 @@ constexpr FRESULT FR_OK = 0;
 constexpr FRESULT FR_DISK_ERR = 1;
 constexpr uint8_t FA_READ = 1;
 
+extern uint32_t abin_test_fail_open_calls;
+extern uint32_t abin_test_fail_read_calls;
+extern uint32_t abin_test_fail_bulk_read_calls;
+extern uint32_t abin_test_fail_lseek_calls;
+
 struct FIL {
     FILE *handle = nullptr;
     FSIZE_t size = 0;
@@ -18,6 +23,10 @@ struct FIL {
 
 static inline FRESULT f_open(FIL *file, const char *path, uint8_t)
 {
+    if (abin_test_fail_open_calls > 0) {
+        abin_test_fail_open_calls--;
+        return FR_DISK_ERR;
+    }
     file->handle = fopen(path, "rb");
     if (file->handle == nullptr || fseek(file->handle, 0, SEEK_END) != 0) {
         return FR_DISK_ERR;
@@ -34,12 +43,26 @@ static inline FRESULT f_open(FIL *file, const char *path, uint8_t)
 
 static inline FRESULT f_read(FIL *file, void *buffer, UINT wanted, UINT *read)
 {
+    if (abin_test_fail_read_calls > 0) {
+        abin_test_fail_read_calls--;
+        *read = 0;
+        return FR_DISK_ERR;
+    }
+    if (wanted > 1 && abin_test_fail_bulk_read_calls > 0) {
+        abin_test_fail_bulk_read_calls--;
+        *read = 0;
+        return FR_DISK_ERR;
+    }
     *read = static_cast<UINT>(fread(buffer, 1, wanted, file->handle));
     return ferror(file->handle) == 0 ? FR_OK : FR_DISK_ERR;
 }
 
 static inline FRESULT f_lseek(FIL *file, FSIZE_t offset)
 {
+    if (abin_test_fail_lseek_calls > 0) {
+        abin_test_fail_lseek_calls--;
+        return FR_DISK_ERR;
+    }
     return fseek(file->handle, static_cast<long>(offset), SEEK_SET) == 0 ? FR_OK : FR_DISK_ERR;
 }
 

@@ -150,13 +150,18 @@ bool flash_from_sd()
     bool success = false;
     ABinFlasher *flasher = nullptr;
     ABinFlasher::Result flash_result = ABinFlasher::Result::WRITE_FAILED;
+    ABinValidationResult validation = ABinValidationResult::IO_ERROR;
     const char *path = find_pending_update();
     if (path == nullptr) {
         goto out;
     }
 
-    if (!abin_validate(path, board_info.fw_size, APJ_BOARD_ID)) {
+    validation = abin_validate(path, board_info.fw_size, APJ_BOARD_ID);
+    if (validation == ABinValidationResult::INVALID) {
         mark_failed(path);
+        goto out;
+    }
+    if (validation == ABinValidationResult::IO_ERROR) {
         goto out;
     }
 

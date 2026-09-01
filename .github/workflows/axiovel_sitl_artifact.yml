@@ -176,7 +176,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           PATH="/github/home/.local/bin:$PATH"
 
-          ./waf configure --board AXIOLIGHT-REVB --bootloader
+          ./waf configure --board AXIOLIGHT-REVB --bootloader --no-submodule-update
           ./waf bootloader
           mkdir -p artifacts/axiolight-revb-bootloader
           cp build/AXIOLIGHT-REVB/bin/AP_Bootloader.bin \
@@ -184,7 +184,7 @@ jobs:
           cp build/AXIOLIGHT-REVB/bin/AP_Bootloader.bin \
             Tools/bootloaders/AXIOLIGHT-REVB_bl.bin
 
-          ./waf configure --board AXIOLIGHT-REVB
+          ./waf configure --board AXIOLIGHT-REVB --no-submodule-update
           ./waf copter
           mkdir -p artifacts/axiolight-revb-copter
           cp build/AXIOLIGHT-REVB/bin/arducopter.apj \

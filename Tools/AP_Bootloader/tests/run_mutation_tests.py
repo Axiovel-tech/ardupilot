@@ -18,6 +18,10 @@ ABIN_HEADER_MUTANTS = [
     ("md5_decode", "!decode_hex(text[index * 2U], high) ||", "!decode_hex(text[index * 2U], high) &&"),
     ("header_line_limit", "line_length >= line_capacity - 1U", "line_length > line_capacity - 1U"),
     ("duplicate_md5", "header.has_md5 || !parse_md5", "header.has_md5 && !parse_md5"),
+    ("open_io_error", "if (f_open(&file, path, FA_READ) != FR_OK) {\n        return ABinValidationResult::IO_ERROR;",
+     "if (f_open(&file, path, FA_READ) != FR_OK) {\n        return ABinValidationResult::INVALID;"),
+    ("header_read_io_error", "if (f_read(&file, &value, 1, &bytes_read) != FR_OK) {\n            return ABinValidationResult::IO_ERROR;",
+     "if (f_read(&file, &value, 1, &bytes_read) != FR_OK) {\n            return ABinValidationResult::INVALID;"),
 ]
 
 
@@ -29,8 +33,12 @@ ABIN_FILE_MUTANTS = [
     ("descriptor_board", "descriptor.board_id != board_id", "false"),
     ("descriptor_crc1", "crc1 == descriptor.image_crc1 &&", "true &&"),
     ("descriptor_crc2", "crc2 == descriptor.image_crc2", "true"),
-    ("image_limit", "padded_size <= maximum_image_size && ", ""),
-    ("descriptor_type", "if (valid && location.is_signed)", "if (valid && !location.is_signed)"),
+    ("image_limit", " || padded_size > maximum_image_size", ""),
+    ("descriptor_type", "if (location.is_signed)", "if (!location.is_signed)"),
+    ("seek_io_error", "ABinValidationResult::VALID : ABinValidationResult::IO_ERROR;",
+     "ABinValidationResult::VALID : ABinValidationResult::INVALID;"),
+    ("read_io_error", "if (f_read(&file, buffer, wanted, &bytes_read) != FR_OK) {\n        return ABinValidationResult::IO_ERROR;",
+     "if (f_read(&file, buffer, wanted, &bytes_read) != FR_OK) {\n        return ABinValidationResult::INVALID;"),
     ("stream_finish", "return success && sink.finish();", "return success;"),
 ]
 
