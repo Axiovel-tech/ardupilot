@@ -4500,6 +4500,24 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_origin(old_pos)
 
         self.takeoff()
+
+        # External navigation and LOCAL_POSITION_NED are both relative to the
+        # public EKF origin.  The EKF's private height origin may move during
+        # barometer initialisation, but that must not appear in the output.
+        self.change_mode('LOITER')
+        self.delay_sim_time(3)
+        z_errors = []
+        tstart = self.get_sim_time()
+        while self.get_sim_time_cached() - tstart < 5:
+            vicon_pos = self.assert_receive_message('VISION_POSITION_ESTIMATE')
+            local_pos = self.assert_receive_message('LOCAL_POSITION_NED')
+            z_errors.append(local_pos.z - vicon_pos.z)
+        median_z_error = numpy.median(z_errors)
+        self.progress("Median external-navigation Z error: %.3fm" % median_z_error)
+        if abs(median_z_error) > 0.05:
+            raise NotAchievedException(
+                "External-navigation Z differs from LOCAL_POSITION_NED by %.3fm" % median_z_error)
+
         self.set_rc(1, 1600)
         tstart = self.get_sim_time()
         while True:
