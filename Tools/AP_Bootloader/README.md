@@ -44,6 +44,12 @@ the flashed application's board ID, length and CRC before marking success. A
 transient erase, write, validation or SD read error leaves the flash marker in
 place for the next boot.
 
+If an SD update does not complete, the bootloader returns to the installed
+application only when its descriptor, board ID, length and CRC still validate.
+This lets the ground stack reconnect after a pre-erase rejection without ever
+booting a partially written application. An explicit bootloader reboot with no
+SD update remains in the normal USB/UART bootloader flow.
+
 ### First-time AXIOLIGHT-REVB provisioning
 
 The checking bootloader only boots applications that contain an ArduPilot

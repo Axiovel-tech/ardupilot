@@ -9,6 +9,7 @@
 #include "support.h"
 
 #include <AP_CheckFirmware/AP_CheckFirmware.h>
+#include <AP_HAL_ChibiOS/sdcard.h>
 #include <AP_HAL_ChibiOS/hwdef/common/flash.h>
 #include <AP_Math/AP_Math.h>
 
@@ -64,8 +65,9 @@ bool file_exists(const char *path)
     return f_stat(path, &info) == FR_OK;
 }
 
-const char *find_pending_update()
+const char *find_pending_update(bool &update_found)
 {
+    update_found = true;
     if (file_exists(FLASH_PATH)) {
         return FLASH_PATH;
     }
@@ -73,6 +75,7 @@ const char *find_pending_update()
         return VERIFY_PATH;
     }
     if (!file_exists(INPUT_PATH)) {
+        update_found = false;
         return nullptr;
     }
 
@@ -362,21 +365,26 @@ private:
 
 } // namespace
 
-bool flash_from_sd()
+FlashFromSDResult flash_from_sd()
 {
     peripheral_power_enable();
     if (!sdcard_init()) {
-        return false;
+        return FlashFromSDResult::NO_UPDATE;
     }
 
-    bool success = false;
+    FlashFromSDResult result = FlashFromSDResult::NO_UPDATE;
     ABinVerifier *verifier = nullptr;
     ABinFlasher *flasher = nullptr;
     ABinValidationResult validation = ABinValidationResult::IO_ERROR;
-    const char *path = find_pending_update();
+    bool update_found = false;
+    const char *path = find_pending_update(update_found);
     if (path == nullptr) {
+        if (update_found) {
+            result = FlashFromSDResult::FAILED;
+        }
         goto out;
     }
+    result = FlashFromSDResult::FAILED;
 
     verifier = NEW_NOTHROW ABinVerifier{path};
     if (verifier == nullptr) {
@@ -408,13 +416,15 @@ bool flash_from_sd()
     flasher = nullptr;
 
     f_unlink(FLASHED_PATH);
-    success = f_rename(FLASH_PATH, FLASHED_PATH) == FR_OK;
+    if (f_rename(FLASH_PATH, FLASHED_PATH) == FR_OK) {
+        result = FlashFromSDResult::FLASHED;
+    }
 
 out:
     delete verifier;
     delete flasher;
     sdcard_stop();
-    return success;
+    return result;
 }
 
 #endif // AP_BOOTLOADER_FLASH_FROM_SD_ENABLED
