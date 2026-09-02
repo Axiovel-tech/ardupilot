@@ -1,4 +1,0 @@
-#pragma once
-
-#define AP_BOOTLOADER_FLASH_FROM_SD_ENABLED 1
-#define AP_CHECK_FIRMWARE_ENABLED 1

@@ -242,6 +242,18 @@ jobs:
                 --romfs-header build/AXIOLIGHT-REVB/ap_romfs_embedded.h \
                 --bootloader artifacts/axiolight-revb-bootloader/bootloader.bin
 
+              # First-time OTA provisioning must install the checking
+              # bootloader and a descriptor-enabled application together.
+              python3 -m pip install --disable-pip-version-check --no-cache-dir \
+                --target /tmp/axiovel-intelhex intelhex==2.3.0
+              PYTHONPATH=/tmp/axiovel-intelhex python3 Tools/scripts/make_intel_hex.py \
+                build/AXIOLIGHT-REVB/bin/arducopter.bin \
+                Tools/bootloaders/AXIOLIGHT-REVB_bl.bin 384
+              test -f build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex
+              mkdir -p artifacts/axiolight-revb-provisioning
+              cp build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex \
+                artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex
+
               ccache -s
               ccache -z
             '
@@ -254,6 +266,7 @@ jobs:
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           app_sha=$(sha256sum artifacts/axiolight-revb-copter/arducopter.apj | cut -d' ' -f1)
           bootloader_sha=$(sha256sum artifacts/axiolight-revb-bootloader/bootloader.bin | cut -d' ' -f1)
+          provisioning_sha=$(sha256sum artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex | cut -d' ' -f1)
 
           cat > artifacts/axiolight-revb-copter/manifest.json <<EOF
           {
@@ -285,6 +298,23 @@ jobs:
           }
           EOF
 
+          cat > artifacts/axiolight-revb-provisioning/manifest.json <<EOF
+          {
+            "vehicle": "provisioning",
+            "board": "AXIOLIGHT-REVB",
+            "board_id": 1177,
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "${run_url}",
+            "built_at": "${built_at}",
+            "file": "axiolight-revb-provisioning.hex",
+            "sha256": "${provisioning_sha}",
+            "bootloader_sha256": "${bootloader_sha}",
+            "application_apj_sha256": "${app_sha}"
+          }
+          EOF
+
       - name: Upload AXIOLIGHT-REVB Copter firmware
         uses: actions/upload-artifact@v4
         with:
@@ -298,6 +328,14 @@ jobs:
         with:
           name: axiolight-revb-bootloader
           path: artifacts/axiolight-revb-bootloader
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AXIOLIGHT-REVB provisioning image
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-provisioning
+          path: artifacts/axiolight-revb-provisioning
           if-no-files-found: error
           retention-days: 30
 

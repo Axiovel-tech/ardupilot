@@ -39,10 +39,22 @@ at `/ardupilot.abin`. The bootloader uses these marker names:
 - `/ardupilot-flashed.abin` is terminal success.
 - `/ardupilot-failed.abin` is terminal rejection. A new update must replace it.
 
-The bootloader checks the ABIN MD5, image size, embedded board ID and embedded
-image CRC before erasing the application. It checks the flashed application
-again before marking success. A transient erase, write or SD read error leaves
-the flash marker in place for the next boot.
+The bootloader checks the ABIN MD5 before erasing the application. It checks
+the flashed application's board ID, length and CRC before marking success. A
+transient erase, write, validation or SD read error leaves the flash marker in
+place for the next boot.
+
+### First-time AXIOLIGHT-REVB provisioning
+
+The checking bootloader only boots applications that contain an ArduPilot
+application descriptor. Older AXIOLIGHT-REVB firmware does not contain one, so
+installing this bootloader by itself would leave that application in the
+bootloader. For first-time OTA provisioning, use physical recovery to flash the
+`axiolight-revb-provisioning` artifact's combined
+`axiolight-revb-provisioning.hex`. It installs the matching bootloader and a
+descriptor-enabled application in one programmer operation. Do not provision a
+legacy application with the standalone bootloader artifact. Subsequent
+application updates can use the SD-card flow above.
 
 SITL can emulate the marker transaction when it receives a reboot-to-bootloader
 request. Set `AXIO_SIM_SD_OTA=1` before starting SITL. Set

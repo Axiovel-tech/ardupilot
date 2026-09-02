@@ -224,8 +224,8 @@ void Scheduler::sitl_end_atomic() {
 
 void Scheduler::reboot(bool hold_in_bootloader)
 {
-    if (hold_in_bootloader && SDCardOTA::enabled()) {
-        SDCardOTA::emulate();
+    if (hold_in_bootloader && sdcard_ota_enabled()) {
+        emulate_sdcard_ota();
     }
     HAL_SITL::actually_reboot();
     abort();

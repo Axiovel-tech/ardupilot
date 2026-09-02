@@ -6,7 +6,8 @@
 #include <string.h>
 #include <unistd.h>
 
-using HALSITL::SDCardOTA;
+using HALSITL::emulate_sdcard_ota;
+using HALSITL::sdcard_ota_enabled;
 
 namespace {
 
@@ -58,11 +59,11 @@ private:
 TEST(SDCardOTA, RequiresExplicitEnable)
 {
     unsetenv("AXIO_SIM_SD_OTA");
-    EXPECT_FALSE(SDCardOTA::enabled());
+    EXPECT_FALSE(sdcard_ota_enabled());
     setenv("AXIO_SIM_SD_OTA", "0", 1);
-    EXPECT_FALSE(SDCardOTA::enabled());
+    EXPECT_FALSE(sdcard_ota_enabled());
     setenv("AXIO_SIM_SD_OTA", "1", 1);
-    EXPECT_TRUE(SDCardOTA::enabled());
+    EXPECT_TRUE(sdcard_ota_enabled());
     unsetenv("AXIO_SIM_SD_OTA");
 }
 
@@ -72,7 +73,7 @@ TEST(SDCardOTA, MovesInputToFlashedMarker)
     directory.create("ardupilot-failed.abin");
     directory.create("ardupilot.abin");
 
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::FLASHED);
+    emulate_sdcard_ota();
     EXPECT_FALSE(directory.exists("ardupilot.abin"));
     EXPECT_FALSE(directory.exists("ardupilot-failed.abin"));
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
@@ -84,7 +85,7 @@ TEST(SDCardOTA, MarksAnInjectedFailure)
     directory.create("ardupilot.abin");
     setenv("AXIO_SIM_SD_OTA_RESULT", "failure", 1);
 
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::FAILED);
+    emulate_sdcard_ota();
     EXPECT_TRUE(directory.exists("ardupilot-failed.abin"));
 }
 
@@ -94,11 +95,11 @@ TEST(SDCardOTA, ResumesAnInterruptedFlash)
     directory.create("ardupilot.abin");
     setenv("AXIO_SIM_SD_OTA_RESULT", "interrupted", 1);
 
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::INTERRUPTED);
+    emulate_sdcard_ota();
     EXPECT_TRUE(directory.exists("ardupilot-flash.abin"));
 
     unsetenv("AXIO_SIM_SD_OTA_RESULT");
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::FLASHED);
+    emulate_sdcard_ota();
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
 }
 
@@ -107,7 +108,7 @@ TEST(SDCardOTA, ResumesVerificationMarker)
     TemporaryDirectory directory;
     directory.create("ardupilot-verify.abin");
 
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::FLASHED);
+    emulate_sdcard_ota();
     EXPECT_FALSE(directory.exists("ardupilot-verify.abin"));
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
 }
@@ -118,15 +119,27 @@ TEST(SDCardOTA, GivesFlashMarkerPriority)
     directory.create("ardupilot-flash.abin");
     directory.create("ardupilot.abin");
 
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::FLASHED);
+    emulate_sdcard_ota();
     EXPECT_TRUE(directory.exists("ardupilot.abin"));
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
+}
+
+TEST(SDCardOTA, RetainsFlashMarkerAfterInjectedFailure)
+{
+    TemporaryDirectory directory;
+    directory.create("ardupilot-flash.abin");
+    setenv("AXIO_SIM_SD_OTA_RESULT", "failure", 1);
+
+    emulate_sdcard_ota();
+    EXPECT_TRUE(directory.exists("ardupilot-flash.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-failed.abin"));
 }
 
 TEST(SDCardOTA, DoesNothingWithoutAnUpdate)
 {
     TemporaryDirectory directory;
-    EXPECT_EQ(SDCardOTA::emulate(), SDCardOTA::Result::NO_UPDATE);
+    emulate_sdcard_ota();
+    EXPECT_FALSE(directory.exists("ardupilot-flashed.abin"));
 }
 
 } // namespace
