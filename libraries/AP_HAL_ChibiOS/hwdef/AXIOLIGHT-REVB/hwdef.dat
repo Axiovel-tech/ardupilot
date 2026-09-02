@@ -17,9 +17,7 @@ FLASH_SIZE_KB 2048
 # bootloader takes first sector
 FLASH_RESERVE_START_KB 384
 
-# Produce the SD-card update image and embed the descriptor that lets the
-# bootloader check its board ID, length and CRC before booting it.
-env BUILD_ABIN True
+# Embed the descriptor that lets the bootloader check board ID, length and CRC.
 define AP_CHECK_FIRMWARE_ENABLED 1
 
 # Storage configuration

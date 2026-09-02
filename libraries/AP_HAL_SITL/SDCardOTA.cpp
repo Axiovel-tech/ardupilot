@@ -51,42 +51,41 @@ bool requested_result(const char *value)
 
 } // namespace
 
-bool SDCardOTA::enabled()
+bool sdcard_ota_enabled()
 {
     const char *value = getenv("AXIO_SIM_SD_OTA");
     return value != nullptr && strcmp(value, "1") == 0;
 }
 
-SDCardOTA::Result SDCardOTA::emulate()
+void emulate_sdcard_ota()
 {
     const char *path = pending_update();
     if (path == nullptr) {
-        return Result::NO_UPDATE;
+        return;
     }
 
     if (requested_result("failure")) {
-        const bool marked = move_file(path, FAILED_PATH);
-        fprintf(stderr, "AXIO_SIM_SD_OTA: emulated update failure\n");
-        return marked ? Result::FAILED : Result::INTERRUPTED;
+        if (strcmp(path, VERIFY_PATH) == 0 && move_file(path, FAILED_PATH)) {
+            fprintf(stderr, "AXIO_SIM_SD_OTA: emulated update rejection\n");
+        }
+        return;
     }
 
     if (strcmp(path, VERIFY_PATH) == 0) {
         if (!move_file(VERIFY_PATH, FLASH_PATH)) {
-            return Result::INTERRUPTED;
+            return;
         }
         path = FLASH_PATH;
     }
 
     if (requested_result("interrupted")) {
         fprintf(stderr, "AXIO_SIM_SD_OTA: emulated interrupted flash\n");
-        return Result::INTERRUPTED;
+        return;
     }
 
-    if (!move_file(FLASH_PATH, FLASHED_PATH)) {
-        return Result::INTERRUPTED;
+    if (move_file(FLASH_PATH, FLASHED_PATH)) {
+        fprintf(stderr, "AXIO_SIM_SD_OTA: emulated marker transition only, no STM32 flash occurred\n");
     }
-    fprintf(stderr, "AXIO_SIM_SD_OTA: emulated marker transition only, no STM32 flash occurred\n");
-    return Result::FLASHED;
 }
 
 } // namespace HALSITL
