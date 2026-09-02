@@ -66,6 +66,22 @@ AP_FlashIface_JEDEC ext_flash;
 static BL_Network network;
 #endif
 
+#if AP_BOOTLOADER_FLASH_FROM_SD_ENABLED
+static void try_boot_after_sd_update()
+{
+    const FlashFromSDResult result = flash_from_sd();
+    bool firmware_ok = false;
+#if AP_CHECK_FIRMWARE_ENABLED
+    if (result == FlashFromSDResult::FAILED) {
+        firmware_ok = check_good_firmware() == check_fw_result_t::CHECK_FW_OK;
+    }
+#endif
+    if (boot_after_sd_update(result, firmware_ok)) {
+        jump_to_app();
+    }
+}
+#endif
+
 int main(void)
 {
 #ifdef AP_BOOTLOADER_CUSTOM_HERE4
@@ -219,9 +235,7 @@ int main(void)
 #endif
 
 #if AP_BOOTLOADER_FLASH_FROM_SD_ENABLED
-    if (flash_from_sd()) {
-        jump_to_app();
-    }
+    try_boot_after_sd_update();
 #endif
 
 #if defined(BOOTLOADER_DEV_LIST)
@@ -241,5 +255,3 @@ int main(void)
     }
 #endif
 }
-
-
