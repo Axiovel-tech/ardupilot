@@ -164,7 +164,7 @@ jobs:
             echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
             exit 1
           fi
-          docker run --rm --cpus=1 --memory=1g \
+          docker run --rm --cpus=1 --memory=1g --user 0:0 \
             -v "$workspace:$workspace" \
             ardupilot/ardupilot-dev-chibios:v0.1.3 \
             chown -R "$(id -u):$(id -g)" "$workspace"
