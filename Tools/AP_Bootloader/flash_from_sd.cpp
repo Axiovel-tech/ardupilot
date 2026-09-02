@@ -101,8 +101,28 @@ protected:
     ABinValidationResult parse();
 
 private:
+    enum class State : uint8_t {
+        START_NAME,
+        ACCUMULATING_NAME,
+        SKIPPING_POST_COLON_SPACES,
+        START_VALUE,
+        ACCUMULATING_VALUE,
+        START_BODY,
+        PROCESSING_BODY,
+    };
+
+    struct ParseContext {
+        State state = State::START_NAME;
+        uint16_t name_start = 0;
+        uint16_t name_end = 0;
+        uint16_t value_start = 0;
+        bool body_started = false;
+    };
+
     void emit_name_value(uint16_t name_start, uint16_t name_end,
                          uint16_t value_start, uint16_t value_end);
+    bool process_byte(ParseContext &context, uint16_t &index, UINT bytes_read);
+    bool process_chunk(ParseContext &context, UINT bytes_read);
     ABinValidationResult finish_parse(bool body_started,
                                       ABinValidationResult result);
     const char *path;
@@ -118,6 +138,78 @@ void ABinParser::emit_name_value(uint16_t name_start, uint16_t name_end,
     memcpy(name, &parser_buffer[name_start], name_length);
     memcpy(value, &parser_buffer[value_start], value_length);
     name_value_callback(name, value);
+}
+
+bool ABinParser::process_byte(ParseContext &context, uint16_t &index,
+                              UINT bytes_read)
+{
+    switch (context.state) {
+    case State::START_NAME:
+        if (is_body_delimiter(index, bytes_read)) {
+            index += 2;
+            context.state = State::START_BODY;
+            return true;
+        }
+        if (parser_buffer[index] == ':') {
+            return false;
+        }
+        if (parser_buffer[index] != '\n') {
+            context.name_start = index;
+            context.state = State::ACCUMULATING_NAME;
+        }
+        return true;
+
+    case State::ACCUMULATING_NAME:
+        if (parser_buffer[index] == '\n') {
+            return false;
+        }
+        if (parser_buffer[index] == ':') {
+            context.name_end = index;
+            context.state = State::SKIPPING_POST_COLON_SPACES;
+        }
+        return true;
+
+    case State::SKIPPING_POST_COLON_SPACES:
+        if (parser_buffer[index] == ' ') {
+            return true;
+        }
+        context.state = State::START_VALUE;
+        FALLTHROUGH;
+
+    case State::START_VALUE:
+        context.value_start = index;
+        context.state = State::ACCUMULATING_VALUE;
+        FALLTHROUGH;
+
+    case State::ACCUMULATING_VALUE:
+        if (parser_buffer[index] == '\n') {
+            emit_name_value(context.name_start, context.name_end,
+                            context.value_start, index);
+            context.state = State::START_NAME;
+        }
+        return true;
+
+    case State::START_BODY:
+        context.body_started = true;
+        context.state = State::PROCESSING_BODY;
+        FALLTHROUGH;
+
+    case State::PROCESSING_BODY:
+        body_callback(&parser_buffer[index], bytes_read - index);
+        index = bytes_read;
+        return true;
+    }
+    return true;
+}
+
+bool ABinParser::process_chunk(ParseContext &context, UINT bytes_read)
+{
+    for (uint16_t index = 0; index < bytes_read; index++) {
+        if (!process_byte(context, index, bytes_read)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 ABinValidationResult ABinParser::finish_parse(bool body_started,
@@ -139,22 +231,8 @@ ABinValidationResult ABinParser::parse()
         return ABinValidationResult::IO_ERROR;
     }
 
-    enum class State : uint8_t {
-        START_NAME,
-        ACCUMULATING_NAME,
-        SKIPPING_POST_COLON_SPACES,
-        START_VALUE,
-        ACCUMULATING_VALUE,
-        START_BODY,
-        PROCESSING_BODY,
-    };
-
-    State state = State::START_NAME;
+    ParseContext context;
     ABinValidationResult result = ABinValidationResult::VALID;
-    uint16_t name_start = 0;
-    uint16_t name_end = 0;
-    uint16_t value_start = 0;
-    bool body_started = false;
 
     while (true) {
         UINT bytes_read = 0;
@@ -170,70 +248,13 @@ ABinValidationResult ABinParser::parse()
             break;
         }
 
-        for (uint16_t index = 0; index < bytes_read; index++) {
-            switch (state) {
-            case State::START_NAME:
-                if (is_body_delimiter(index, bytes_read)) {
-                    index += 2;
-                    state = State::START_BODY;
-                    continue;
-                }
-                if (parser_buffer[index] == ':') {
-                    result = ABinValidationResult::INVALID;
-                    goto out;
-                }
-                if (parser_buffer[index] == '\n') {
-                    continue;
-                }
-                name_start = index;
-                state = State::ACCUMULATING_NAME;
-                continue;
-
-            case State::ACCUMULATING_NAME:
-                if (parser_buffer[index] == '\n') {
-                    result = ABinValidationResult::INVALID;
-                    goto out;
-                }
-                if (parser_buffer[index] == ':') {
-                    name_end = index;
-                    state = State::SKIPPING_POST_COLON_SPACES;
-                }
-                continue;
-
-            case State::SKIPPING_POST_COLON_SPACES:
-                if (parser_buffer[index] == ' ') {
-                    continue;
-                }
-                state = State::START_VALUE;
-                FALLTHROUGH;
-
-            case State::START_VALUE:
-                value_start = index;
-                state = State::ACCUMULATING_VALUE;
-                FALLTHROUGH;
-
-            case State::ACCUMULATING_VALUE:
-                if (parser_buffer[index] != '\n') {
-                    continue;
-                }
-                emit_name_value(name_start, name_end, value_start, index);
-                state = State::START_NAME;
-                continue;
-
-            case State::START_BODY:
-                body_started = true;
-                state = State::PROCESSING_BODY;
-                FALLTHROUGH;
-
-            case State::PROCESSING_BODY:
-                body_callback(&parser_buffer[index], bytes_read - index);
-                index = bytes_read;
-                continue;
-            }
+        if (!process_chunk(context, bytes_read)) {
+            result = ABinValidationResult::INVALID;
+            goto out;
         }
     }
 
-    result = finish_parse(body_started, result);
+    result = finish_parse(context.body_started, result);
 
 out:
     f_close(&file);
