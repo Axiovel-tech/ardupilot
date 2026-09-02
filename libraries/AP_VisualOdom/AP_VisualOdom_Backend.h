@@ -19,6 +19,7 @@
 #if HAL_VISUALODOM_ENABLED
 
 #include <AP_Logger/AP_Logger_config.h>
+#include <AP_NavEKF/AP_Nav_Common.h>
 
 class AP_VisualOdom_Backend
 {
@@ -40,7 +41,7 @@ public:
 
     // consume vision pose estimate data and send to EKF. distances in meters
     // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-    virtual void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality) = 0;
+    virtual void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const AP_VisualOdom::PositionCovariance *pos_covariance) = 0;
 
     // consume vision velocity estimate data and send to EKF, velocity in NED meters per second
     // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
@@ -68,7 +69,7 @@ protected:
 #if HAL_LOGGING_ENABLED
     // Logging Functions
     void Write_VisualOdom(float time_delta, const Vector3f &angle_delta, const Vector3f &position_delta, float confidence);
-    void Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float pos_err, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality);
+    void Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, const ExtNavPositionError &pos_err, const AP_VisualOdom::PositionCovariance *pos_covariance, bool covariance_used, float ang_err, uint8_t reset_counter, bool ignored, int8_t quality);
     void Write_VisualVelocity(uint64_t remote_time_us, uint32_t time_ms, const Vector3f &vel, uint8_t reset_counter, bool ignored, int8_t quality);
 #endif
 
