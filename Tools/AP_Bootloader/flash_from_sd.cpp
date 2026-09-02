@@ -4,382 +4,448 @@
 
 #include "ch.h"
 #include "ff.h"
-
 #include "md5.h"
-
-#include <string.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <fcntl.h>
 #include "stm32_util.h"
-
-#include <AP_HAL_ChibiOS/hwdef/common/flash.h>
-#include <AP_Math/AP_Math.h>
 #include "support.h"
 
-// swiped from support.cpp:
-static const uint8_t *flash_base = (const uint8_t *)(0x08000000 + (FLASH_BOOTLOADER_LOAD_KB + APP_START_OFFSET_KB)*1024U);
+#include <AP_CheckFirmware/AP_CheckFirmware.h>
+#include <AP_HAL_ChibiOS/sdcard.h>
+#include <AP_HAL_ChibiOS/hwdef/common/flash.h>
+#include <AP_Math/AP_Math.h>
 
+#include <stdint.h>
+#include <string.h>
 
-// taken from AP_Common.cpp as we don't want to compile the AP_Common
-// directory.  This function is defined in AP_Common.h - so we can't
-// use "static" here.
-/**
- * return the numeric value of an ascii hex character
- * 
- * @param[in] a Hexadecimal character 
- * @return  Returns a binary value
- */
-uint8_t char_to_hex(char a)
-{
-    if (a >= 'A' && a <= 'F')
-        return a - 'A' + 10;
-    else if (a >= 'a' && a <= 'f')
-        return a - 'a' + 10;
-    else
-        return a - '0';
-}
+namespace {
 
-#define MAX_IO_SIZE 4096
-static uint8_t buffer[MAX_IO_SIZE];
+constexpr const char *INPUT_PATH = "/ardupilot.abin";
+constexpr const char *VERIFY_PATH = "/ardupilot-verify.abin";
+constexpr const char *FLASH_PATH = "/ardupilot-flash.abin";
+constexpr const char *FLASHED_PATH = "/ardupilot-flashed.abin";
+constexpr const char *FAILED_PATH = "/ardupilot-failed.abin";
+constexpr uint32_t MAX_IO_SIZE = 4096;
 
-// a class which provides parsing functionality for abin files;
-// inheritors must supply a function to deal with the body of the abin
-// and may supply methods run() (to initialise their state) and
-// name_value_callback (to handle name/value pairs extracted from the
-// abin header.
-class ABinParser {
-public:
-    ABinParser(const char *_path) :
-        path{_path}
-    { }
-    virtual ~ABinParser() {}
+const uint8_t *const APP_FLASH_BASE = reinterpret_cast<const uint8_t *>(
+    0x08000000U + (FLASH_BOOTLOADER_LOAD_KB + APP_START_OFFSET_KB) * 1024U);
 
-    virtual bool run() = 0;
+uint8_t parser_buffer[MAX_IO_SIZE];
 
-protected:
-
-    virtual void name_value_callback(const char *name, const char *value) {}
-    virtual void body_callback(const uint8_t *bytes, uint32_t n) = 0;
-    bool parse();
-
-private:
-
-    const char *path;
-
+enum class ABinValidationResult : uint8_t {
+    VALID,
+    INVALID,
+    IO_ERROR,
 };
 
-bool ABinParser::parse()
+bool decode_hex(char value, uint8_t &decoded)
 {
-    FIL fh;
-    if (f_open(&fh, path, FA_READ) != FR_OK) {
-        return false;
+    if (value >= '0' && value <= '9') {
+        decoded = value - '0';
+        return true;
     }
-    enum class State {
-        START_NAME=17, // "MD5: "
-        ACCUMULATING_NAME=19,
-        ACCUMULATING_VALUE = 30,
-        START_BODY = 40,
-        PROCESSING_BODY = 45,
-        SKIPPING_POST_COLON_SPACES = 50,
-        START_VALUE = 55,
+    if (value >= 'a' && value <= 'f') {
+        decoded = value - 'a' + 10;
+        return true;
+    }
+    if (value >= 'A' && value <= 'F') {
+        decoded = value - 'A' + 10;
+        return true;
+    }
+    return false;
+}
+
+bool is_body_delimiter(uint16_t index, UINT bytes_read)
+{
+    return bytes_read - index >= 3 &&
+           memcmp(&parser_buffer[index], "--\n", 3) == 0;
+}
+
+bool file_exists(const char *path)
+{
+    FILINFO info;
+    return f_stat(path, &info) == FR_OK;
+}
+
+const char *find_pending_update(bool &update_found)
+{
+    update_found = true;
+    if (file_exists(FLASH_PATH)) {
+        return FLASH_PATH;
+    }
+    if (file_exists(VERIFY_PATH)) {
+        return VERIFY_PATH;
+    }
+    if (!file_exists(INPUT_PATH)) {
+        update_found = false;
+        return nullptr;
+    }
+
+    f_unlink(FLASHED_PATH);
+    f_unlink(FAILED_PATH);
+    return f_rename(INPUT_PATH, VERIFY_PATH) == FR_OK ? VERIFY_PATH : nullptr;
+}
+
+void mark_failed(const char *path)
+{
+    f_unlink(FAILED_PATH);
+    f_rename(path, FAILED_PATH);
+}
+
+class ABinParser {
+public:
+    explicit ABinParser(const char *_path) : path(_path) {}
+    virtual ~ABinParser() = default;
+
+protected:
+    virtual void name_value_callback(const char *name, const char *value) {}
+    virtual void body_callback(const uint8_t *bytes, uint32_t nbytes) = 0;
+    ABinValidationResult parse();
+
+private:
+    enum class State : uint8_t {
+        START_NAME,
+        ACCUMULATING_NAME,
+        SKIPPING_POST_COLON_SPACES,
+        START_VALUE,
+        ACCUMULATING_VALUE,
+        START_BODY,
+        PROCESSING_BODY,
     };
 
-    State state = State::START_NAME;
-    uint16_t name_start = 0;
-    uint16_t name_end = 0;
-    uint16_t value_start = 0;
-    // for efficiency we assume all headers are within the first chunk
-    // read i.e. the name/value pairs do not cross a MAX_IO_SIZE
-    // boundary
-    while (true) {
-        UINT bytes_read;
-        if (f_read(&fh, buffer, sizeof(buffer), &bytes_read) != FR_OK) {
+    struct ParseContext {
+        State state = State::START_NAME;
+        uint16_t name_start = 0;
+        uint16_t name_end = 0;
+        uint16_t value_start = 0;
+        bool body_started = false;
+    };
+
+    void emit_name_value(uint16_t name_start, uint16_t name_end,
+                         uint16_t value_start, uint16_t value_end);
+    bool process_byte(ParseContext &context, uint16_t &index, UINT bytes_read);
+    bool process_chunk(ParseContext &context, UINT bytes_read);
+    ABinValidationResult finish_parse(bool body_started,
+                                      ABinValidationResult result);
+    const char *path;
+};
+
+void ABinParser::emit_name_value(uint16_t name_start, uint16_t name_end,
+                                 uint16_t value_start, uint16_t value_end)
+{
+    char name[80] {};
+    char value[80] {};
+    const uint16_t name_length = MIN(sizeof(name) - 1U, name_end - name_start);
+    const uint16_t value_length = MIN(sizeof(value) - 1U, value_end - value_start);
+    memcpy(name, &parser_buffer[name_start], name_length);
+    memcpy(value, &parser_buffer[value_start], value_length);
+    name_value_callback(name, value);
+}
+
+bool ABinParser::process_byte(ParseContext &context, uint16_t &index,
+                              UINT bytes_read)
+{
+    switch (context.state) {
+    case State::START_NAME:
+        if (is_body_delimiter(index, bytes_read)) {
+            index += 2;
+            context.state = State::START_BODY;
+            return true;
+        }
+        if (parser_buffer[index] == ':') {
             return false;
         }
-        if (bytes_read > sizeof(buffer)) {
-            // error
+        if (parser_buffer[index] != '\n') {
+            context.name_start = index;
+            context.state = State::ACCUMULATING_NAME;
+        }
+        return true;
+
+    case State::ACCUMULATING_NAME:
+        if (parser_buffer[index] == '\n') {
             return false;
+        }
+        if (parser_buffer[index] == ':') {
+            context.name_end = index;
+            context.state = State::SKIPPING_POST_COLON_SPACES;
+        }
+        return true;
+
+    case State::SKIPPING_POST_COLON_SPACES:
+        if (parser_buffer[index] == ' ') {
+            return true;
+        }
+        context.state = State::START_VALUE;
+        FALLTHROUGH;
+
+    case State::START_VALUE:
+        context.value_start = index;
+        context.state = State::ACCUMULATING_VALUE;
+        FALLTHROUGH;
+
+    case State::ACCUMULATING_VALUE:
+        if (parser_buffer[index] == '\n') {
+            emit_name_value(context.name_start, context.name_end,
+                            context.value_start, index);
+            context.state = State::START_NAME;
+        }
+        return true;
+
+    case State::START_BODY:
+        context.body_started = true;
+        context.state = State::PROCESSING_BODY;
+        FALLTHROUGH;
+
+    case State::PROCESSING_BODY:
+        body_callback(&parser_buffer[index], bytes_read - index);
+        index = bytes_read;
+        return true;
+    }
+    return true;
+}
+
+bool ABinParser::process_chunk(ParseContext &context, UINT bytes_read)
+{
+    for (uint16_t index = 0; index < bytes_read; index++) {
+        if (!process_byte(context, index, bytes_read)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+ABinValidationResult ABinParser::finish_parse(bool body_started,
+                                              ABinValidationResult result)
+{
+    if (!body_started) {
+        return ABinValidationResult::INVALID;
+    }
+    if (result == ABinValidationResult::VALID) {
+        body_callback(nullptr, 0);
+    }
+    return result;
+}
+
+ABinValidationResult ABinParser::parse()
+{
+    FIL file;
+    if (f_open(&file, path, FA_READ) != FR_OK) {
+        return ABinValidationResult::IO_ERROR;
+    }
+
+    ParseContext context;
+    ABinValidationResult result = ABinValidationResult::VALID;
+
+    while (true) {
+        UINT bytes_read = 0;
+        if (f_read(&file, parser_buffer, sizeof(parser_buffer), &bytes_read) != FR_OK) {
+            result = ABinValidationResult::IO_ERROR;
+            break;
+        }
+        if (bytes_read > sizeof(parser_buffer)) {
+            result = ABinValidationResult::INVALID;
+            break;
         }
         if (bytes_read == 0) {
             break;
         }
-        for (uint16_t i=0; i<bytes_read; i++) {
-            switch (state) {
-            case State::START_NAME: {
-                // check for delimiter:
-                if (bytes_read-i >= 3) {
-                    if (!strncmp((char*)&buffer[i], "--\n", bytes_read-i)) {
-                        // end of headers
-                        i += 2;
-                        state = State::START_BODY;
-                        continue;
-                    }
-                }
-                // sanity check input:
-                if (buffer[i] == ':') {
-                    // zero-length name?! just say no:
-                    return false;
-                }
-                if (buffer[i] == '\n') {
-                    // empty line... ignore it
-                    continue;
-                }
-                name_start = i;
-                state = State::ACCUMULATING_NAME;
-                continue;
-            }
-            case State::ACCUMULATING_NAME: {
-                if (buffer[i] == '\n') {
-                    // no colon on this line; just say no:
-                    return false;
-                }
-                if (buffer[i] == ':') {
-                    name_end = i;
-                    state = State::SKIPPING_POST_COLON_SPACES;
-                    continue;
-                }
-                // continue to accumulate name
-                continue;
-            }
-            case State::SKIPPING_POST_COLON_SPACES:
-                if (buffer[i] == ' ') {
-                    // continue to accumulate spaces
-                    continue;
-                }
-                state = State::START_VALUE;
-                FALLTHROUGH;
-            case State::START_VALUE:
-                value_start = i;
-                state = State::ACCUMULATING_VALUE;
-                FALLTHROUGH;
-            case State::ACCUMULATING_VALUE: {
-                if (buffer[i] != '\n') {
-                    // continue to accumate value bytes
-                    continue;
-                }
-                char name[80];
-                char value[80];
-                strncpy(name, (char*)&buffer[name_start], MIN(sizeof(name)-1, name_end-name_start));
-                strncpy(value, (char*)&buffer[value_start], MIN(sizeof(value)-1, i-value_start));
-                name_value_callback(name, value);
-                state = State::START_NAME;
-                continue;
-            }
-            case State::START_BODY:
-                state = State::PROCESSING_BODY;
-                FALLTHROUGH;
-            case State::PROCESSING_BODY:
-                body_callback(&buffer[i], bytes_read-i);
-                i = bytes_read;
-                continue;
-            }
+
+        if (!process_chunk(context, bytes_read)) {
+            result = ABinValidationResult::INVALID;
+            goto out;
         }
     }
 
-    // successfully parsed the abin.  Call the body callback once more
-    // with zero bytes indicating EOF:
-    body_callback((uint8_t*)"", 0);
+    result = finish_parse(context.body_started, result);
 
-    return true;
+out:
+    f_close(&file);
+    return result;
 }
 
-// a sub-class of ABinParser which takes the supplied MD5 from the
-// abin header and compares it against the calculated md5sum of the
-// abin body
-class ABinVerifier : ABinParser {
+class ABinVerifier : public ABinParser {
 public:
-
     using ABinParser::ABinParser;
 
-    bool run() override {
+    ABinValidationResult run()
+    {
         MD5Init(&md5_context);
-
-        if (!parse()) {
-            return false;
+        const ABinValidationResult parse_result = parse();
+        if (parse_result != ABinValidationResult::VALID) {
+            return parse_result;
+        }
+        if (!has_expected_md5 || invalid_header) {
+            return ABinValidationResult::INVALID;
         }
 
-        // verify the checksum is as expected
         uint8_t calculated_md5[16];
         MD5Final(calculated_md5, &md5_context);
-        if (!memcmp(calculated_md5, expected_md5, sizeof(calculated_md5))) {
-            // checksums match
-            return true;
-        }
-
-        return false;
+        return memcmp(calculated_md5, expected_md5, sizeof(calculated_md5)) == 0 ?
+               ABinValidationResult::VALID : ABinValidationResult::INVALID;
     }
 
 protected:
-
-    void name_value_callback(const char *name, const char *value) override {
-        if (strncmp(name, "MD5", 3)) {
-            // only interested in MD5 header
+    void name_value_callback(const char *name, const char *value) override
+    {
+        if (strcmp(name, "MD5") != 0) {
             return;
         }
-
-        // convert from 32-byte-string to 16-byte number:
-        for (uint8_t j=0; j<16; j++) {
-            expected_md5[j] = (char_to_hex(value[j*2]) << 4) | char_to_hex(value[j*2+1]);
+        if (has_expected_md5 || strlen(value) != 32) {
+            invalid_header = true;
+            return;
         }
+        for (uint8_t index = 0; index < sizeof(expected_md5); index++) {
+            uint8_t high;
+            uint8_t low;
+            if (!decode_hex(value[index * 2U], high) ||
+                !decode_hex(value[index * 2U + 1U], low)) {
+                invalid_header = true;
+                return;
+            }
+            expected_md5[index] = high << 4U | low;
+        }
+        has_expected_md5 = true;
     }
 
-    void body_callback(const uint8_t *bytes, uint32_t nbytes) override {
-        MD5Update(&md5_context, bytes, nbytes);
+    void body_callback(const uint8_t *bytes, uint32_t nbytes) override
+    {
+        if (nbytes > 0) {
+            MD5Update(&md5_context, bytes, nbytes);
+        }
     }
 
 private:
-
-    uint8_t expected_md5[16];
+    uint8_t expected_md5[16] {};
     MD5Context md5_context;
+    bool has_expected_md5 = false;
+    bool invalid_header = false;
 };
 
-
-// a sub-class of ABinParser which flashes the body of the supplied abin
 class ABinFlasher : public ABinParser {
 public:
     using ABinParser::ABinParser;
 
-    bool run() override {
-        // start by erasing all sectors
-        for (uint8_t i = 0; flash_func_sector_size(i) != 0; i++) {
-            if (!flash_func_erase_sector(i)) {
+    bool run()
+    {
+        for (uint8_t sector = 0; flash_func_sector_size(sector) != 0; sector++) {
+            if (!flash_func_erase_sector(sector)) {
                 return false;
             }
             led_toggle(LED_BOOTLOADER);
         }
 
-        // parse and flash
-        if (!parse()) {
+        if (parse() != ABinValidationResult::VALID || failed) {
             return false;
         }
 
-        return !failed;
+#if AP_CHECK_FIRMWARE_ENABLED
+        return check_good_firmware() == check_fw_result_t::CHECK_FW_OK;
+#else
+        return true;
+#endif
     }
 
 protected:
-
-    void body_callback(const uint8_t *bytes, uint32_t nbytes) override {
+    void body_callback(const uint8_t *bytes, uint32_t nbytes) override
+    {
         if (failed) {
             return;
         }
 
-        memcpy(&buffer[buffer_ofs], bytes, nbytes);
-        buffer_ofs += nbytes;
+        if (nbytes > 0) {
+            memcpy(&buffer[buffer_offset], bytes, nbytes);
+            buffer_offset += nbytes;
+        }
 
-        const uint32_t WRITE_CHUNK_SIZE = 32*1024; // must be less than size of state buffer
-        // nbytes is zero after the last chunk in the body
-        if (buffer_ofs > WRITE_CHUNK_SIZE || nbytes == 0) {
+        constexpr uint32_t WRITE_CHUNK_SIZE = 32U * 1024U;
+        if (buffer_offset > WRITE_CHUNK_SIZE || nbytes == 0) {
+            uint32_t consumed_size = WRITE_CHUNK_SIZE;
             uint32_t write_size = WRITE_CHUNK_SIZE;
-            uint32_t padded_write_size = write_size;
             if (nbytes == 0) {
-                // final chunk.  We have to align to 128 bytes
-                write_size = buffer_ofs;
-                padded_write_size = write_size;
-                const uint8_t pad_size = 128 - (write_size % 128);
-                // zero those extra bytes:
-                memset(&buffer[buffer_ofs], '\0', pad_size);
-                padded_write_size += pad_size;
+                consumed_size = buffer_offset;
+                write_size = (consumed_size + 127U) & ~127U;
+                memset(&buffer[consumed_size], 0, write_size - consumed_size);
             }
-            const uint32_t ofs = uint32_t(flash_base) + flash_ofs;
-            if (!stm32_flash_write(ofs, buffer, padded_write_size)) {
+            if (write_size > board_info.fw_size - flash_offset ||
+                !stm32_flash_write(
+                    uint32_t(APP_FLASH_BASE) + flash_offset, buffer, write_size)) {
                 failed = true;
                 return;
             }
-            flash_ofs += padded_write_size;
-            buffer_ofs -= write_size;
-            memcpy(buffer, &buffer[write_size], buffer_ofs);
+            flash_offset += write_size;
+            buffer_offset -= consumed_size;
+            memmove(buffer, &buffer[consumed_size], buffer_offset);
             led_toggle(LED_BOOTLOADER);
         }
     }
 
 private:
-
-    uint32_t flash_ofs = 0;
-    uint32_t buffer_ofs = 0;
-    uint8_t buffer[64*1024];  // constrained by memory map on bootloader
+    uint32_t flash_offset = 0;
+    uint32_t buffer_offset = 0;
+    uint8_t buffer[64U * 1024U] {};
     bool failed = false;
 };
 
+} // namespace
 
-// main entry point to the flash-from-sd-card functionality; called
-// from the bootloader main function
-bool flash_from_sd()
+FlashFromSDResult flash_from_sd()
 {
     peripheral_power_enable();
-
     if (!sdcard_init()) {
-        return false;
+        return FlashFromSDResult::NO_UPDATE;
     }
 
-    bool ret = false;
-
-    // expected filepath for abin:
-    const char *abin_path = "/ardupilot.abin";
-    // we rename to this before verifying the abin:
-    const char *verify_abin_path = "/ardupilot-verify.abin";
-    // we rename to this before flashing the abin:
-    const char *flash_abin_path = "/ardupilot-flash.abin";
-    // we rename to this after flashing the abin:
-    const char *flashed_abin_path = "/ardupilot-flashed.abin";
-
+    FlashFromSDResult result = FlashFromSDResult::NO_UPDATE;
     ABinVerifier *verifier = nullptr;
     ABinFlasher *flasher = nullptr;
-
-    FILINFO info;
-    if (f_stat(abin_path, &info) != FR_OK) {
+    ABinValidationResult validation = ABinValidationResult::IO_ERROR;
+    bool update_found = false;
+    const char *path = find_pending_update(update_found);
+    if (path == nullptr) {
+        if (update_found) {
+            result = FlashFromSDResult::FAILED;
+        }
         goto out;
     }
+    result = FlashFromSDResult::FAILED;
 
-    f_unlink(verify_abin_path);
-    f_unlink(flash_abin_path);
-    f_unlink(flashed_abin_path);
-
-    // rename the file so we only ever attempt to flash from it once:
-    if (f_rename(abin_path, verify_abin_path) != FR_OK) {
-        // we would be nice to indicate an error here.
-        // we could try to drop a message on the SD card?
-        return false;
-    }
-
-    verifier = NEW_NOTHROW ABinVerifier{verify_abin_path};
-    if (!verifier->run()) {
+    verifier = NEW_NOTHROW ABinVerifier{path};
+    if (verifier == nullptr) {
         goto out;
     }
-
-    // rename the file so we only ever attempt to flash from it once:
-    if (f_rename(verify_abin_path, flash_abin_path) != FR_OK) {
-        // we would be nice to indicate an error here.
-        // we could try to drop a message on the SD card?
-        return false;
-    }
-
-    flasher = NEW_NOTHROW ABinFlasher{flash_abin_path};
-    if (!flasher->run()) {
-        goto out;
-    }
-
-    // rename the file to indicate successful flash:
-    if (f_rename(flash_abin_path, flashed_abin_path) != FR_OK) {
-        // we would be nice to indicate an error here.
-        // we could try to drop a message on the SD card?
-        return false;
-    }
-
-    ret = true;
-
-out:
-
+    validation = verifier->run();
     delete verifier;
     verifier = nullptr;
+    if (validation != ABinValidationResult::VALID) {
+        if (validation == ABinValidationResult::INVALID &&
+            strcmp(path, VERIFY_PATH) == 0) {
+            mark_failed(path);
+        }
+        goto out;
+    }
 
+    if (strcmp(path, VERIFY_PATH) == 0) {
+        if (f_rename(VERIFY_PATH, FLASH_PATH) != FR_OK) {
+            goto out;
+        }
+        path = FLASH_PATH;
+    }
+
+    flasher = NEW_NOTHROW ABinFlasher{path};
+    if (flasher == nullptr || !flasher->run()) {
+        goto out;
+    }
     delete flasher;
     flasher = nullptr;
 
-    sdcard_stop();
-    // should we disable peripheral power again?!
+    f_unlink(FLASHED_PATH);
+    if (f_rename(FLASH_PATH, FLASHED_PATH) == FR_OK) {
+        result = FlashFromSDResult::FLASHED;
+    }
 
-    return ret;
+out:
+    delete verifier;
+    delete flasher;
+    sdcard_stop();
+    return result;
 }
 
-#endif  // AP_BOOTLOADER_FLASH_FROM_SD_ENABLED
+#endif // AP_BOOTLOADER_FLASH_FROM_SD_ENABLED

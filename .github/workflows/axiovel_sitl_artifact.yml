@@ -33,9 +33,23 @@ jobs:
     timeout-minutes: 90
     container:
       image: ardupilot/ardupilot-dev-base:v0.1.3
-      options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
+      options: --cpus=2 --memory=6g --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
 
     steps:
+      # The hardware artifact job deliberately writes as the host runner user.
+      # Match ownership to this ephemeral container before checkout traverses
+      # nested Git repositories.
+      - name: Recover workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          if [[ -z "$workspace" || "$workspace" == / || ! -d "$workspace" ]]; then
+            echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
+            exit 1
+          fi
+          chown -R "$(id -u):$(id -g)" "$workspace"
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -71,7 +85,7 @@ jobs:
           PATH="/github/home/.local/bin:$PATH"
           # No --debug: this is a distributable binary, not the autotest build.
           ./waf configure --board sitl
-          ./waf copter
+          ./waf copter -j2
           ccache -s
           ccache -z
 
@@ -133,4 +147,202 @@ jobs:
         with:
           name: fail-sitl-copter-build
           path: /tmp/buildlogs
+          retention-days: 14
+
+  axiolight-revb-copter:
+    name: Build and publish AXIOLIGHT-REVB Copter
+    runs-on: [self-hosted, Linux, X64, axio-sitl]
+    timeout-minutes: 120
+
+    steps:
+      - name: Recover workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          if [[ -z "$workspace" || "$workspace" == / || ! -d "$workspace" ]]; then
+            echo "::error::Refusing to change ownership of unsafe workspace: $workspace"
+            exit 1
+          fi
+          docker run --rm --cpus=1 --memory=1g --user 0:0 \
+            -v "$workspace:$workspace" \
+            ardupilot/ardupilot-dev-chibios:v0.1.3 \
+            chown -R "$(id -u):$(id -g)" "$workspace"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Register problem matchers
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          echo "::add-matcher::.github/problem-matchers/python.json"
+
+      - name: Prepare ccache timestamp
+        id: ccache_cache_timestamp
+        run: |
+          NOW=$(date -u +"%F-%T")
+          echo "timestamp=${NOW}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache-ardupilot-docker
+          key: ${{ github.workflow }}-ccache-axiolight-revb-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
+          restore-keys: |
+            ${{ github.workflow }}-ccache-axiolight-revb-
+
+      - name: Setup ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_dir="$HOME/.ccache-ardupilot-docker"
+          mkdir -p "$cache_dir"
+          {
+            echo "base_dir = $GITHUB_WORKSPACE"
+            echo "compression = true"
+            echo "compression_level = 6"
+            echo "max_size = 400M"
+          } > "$cache_dir/ccache.conf"
+
+      - name: Build bootloader and Copter firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/buildlogs"
+          docker run --rm --cpus=2 --memory=6g \
+            -u "$(id -u):$(id -g)" \
+            -e CCACHE_DIR=/tmp/ccache \
+            -e GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            -v "$HOME/.ccache-ardupilot-docker:/tmp/ccache" \
+            -v "$RUNNER_TEMP/buildlogs:/tmp/buildlogs" \
+            -w "$GITHUB_WORKSPACE" \
+            ardupilot/ardupilot-dev-chibios:v0.1.3 \
+            bash -c '
+              set -euo pipefail
+              git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+              ./waf configure --board AXIOLIGHT-REVB --bootloader --no-submodule-update
+              ./waf bootloader -j2
+              mkdir -p artifacts/axiolight-revb-bootloader
+              cp build/AXIOLIGHT-REVB/bin/AP_Bootloader.bin \
+                artifacts/axiolight-revb-bootloader/bootloader.bin
+              cp build/AXIOLIGHT-REVB/bin/AP_Bootloader.bin \
+                Tools/bootloaders/AXIOLIGHT-REVB_bl.bin
+
+              ./waf configure --board AXIOLIGHT-REVB --no-submodule-update
+              ./waf copter -j2
+              mkdir -p artifacts/axiolight-revb-copter
+              cp build/AXIOLIGHT-REVB/bin/arducopter.apj \
+                artifacts/axiolight-revb-copter/arducopter.apj
+              python3 Tools/scripts/verify_embedded_bootloader.py \
+                --apj artifacts/axiolight-revb-copter/arducopter.apj \
+                --romfs-header build/AXIOLIGHT-REVB/ap_romfs_embedded.h \
+                --bootloader artifacts/axiolight-revb-bootloader/bootloader.bin
+
+              # First-time OTA provisioning must install the checking
+              # bootloader and a descriptor-enabled application together.
+              python3 -m pip install --disable-pip-version-check --no-cache-dir \
+                --target /tmp/axiovel-intelhex intelhex==2.3.0
+              PYTHONPATH=/tmp/axiovel-intelhex python3 Tools/scripts/make_intel_hex.py \
+                build/AXIOLIGHT-REVB/bin/arducopter.bin \
+                Tools/bootloaders/AXIOLIGHT-REVB_bl.bin 384
+              test -f build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex
+              mkdir -p artifacts/axiolight-revb-provisioning
+              cp build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex \
+                artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex
+
+              ccache -s
+              ccache -z
+            '
+
+      - name: Stage firmware manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          app_sha=$(sha256sum artifacts/axiolight-revb-copter/arducopter.apj | cut -d' ' -f1)
+          bootloader_sha=$(sha256sum artifacts/axiolight-revb-bootloader/bootloader.bin | cut -d' ' -f1)
+          provisioning_sha=$(sha256sum artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex | cut -d' ' -f1)
+
+          cat > artifacts/axiolight-revb-copter/manifest.json <<EOF
+          {
+            "vehicle": "copter",
+            "board": "AXIOLIGHT-REVB",
+            "board_id": 1177,
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "${run_url}",
+            "built_at": "${built_at}",
+            "file": "arducopter.apj",
+            "sha256": "${app_sha}"
+          }
+          EOF
+
+          cat > artifacts/axiolight-revb-bootloader/manifest.json <<EOF
+          {
+            "vehicle": "bootloader",
+            "board": "AXIOLIGHT-REVB",
+            "board_id": 1177,
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "${run_url}",
+            "built_at": "${built_at}",
+            "file": "bootloader.bin",
+            "sha256": "${bootloader_sha}"
+          }
+          EOF
+
+          cat > artifacts/axiolight-revb-provisioning/manifest.json <<EOF
+          {
+            "vehicle": "provisioning",
+            "board": "AXIOLIGHT-REVB",
+            "board_id": 1177,
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "${run_url}",
+            "built_at": "${built_at}",
+            "file": "axiolight-revb-provisioning.hex",
+            "sha256": "${provisioning_sha}",
+            "bootloader_sha256": "${bootloader_sha}",
+            "application_apj_sha256": "${app_sha}"
+          }
+          EOF
+
+      - name: Upload AXIOLIGHT-REVB Copter firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-copter
+          path: artifacts/axiolight-revb-copter
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AXIOLIGHT-REVB bootloader
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-bootloader
+          path: artifacts/axiolight-revb-bootloader
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AXIOLIGHT-REVB provisioning image
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-provisioning
+          path: artifacts/axiolight-revb-provisioning
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build failure logs
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fail-axiolight-revb-copter-build
+          path: ${{ runner.temp }}/buildlogs
           retention-days: 14
