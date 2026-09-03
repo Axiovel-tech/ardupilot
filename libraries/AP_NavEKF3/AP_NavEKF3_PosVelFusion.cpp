@@ -441,6 +441,7 @@ void NavEKF3_core::CorrectExtNavForSensorOffset(ext_nav_elements &ext_nav_data)
 
     // external nav data is against the public_origin, so convert to offset from EKF_origin
     ext_nav_data.pos.xy() += EKF_origin.get_distance_NE_ftype(public_origin);
+    ext_nav_data.pos.z += (EKF_origin.alt - public_origin.alt) * 0.01;
 
 #if HAL_VISUALODOM_ENABLED
     const auto *visual_odom = dal.visualodom();

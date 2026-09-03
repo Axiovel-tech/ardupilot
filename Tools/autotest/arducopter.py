@@ -4501,15 +4501,34 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.mav.mav.system_time_send(int(time.time() * 1000000), 0)
         self.set_origin(old_pos)
 
+        self.takeoff()
+
+        # External navigation and LOCAL_POSITION_NED are both relative to the
+        # public EKF origin.  The EKF's private height origin may move during
+        # barometer initialisation, but that must not appear in the output.
+        self.change_mode('LOITER')
+        self.delay_sim_time(3)
+        z_errors = []
+        tstart = self.get_sim_time()
+        while self.get_sim_time_cached() - tstart < 5:
+            vicon_pos = self.assert_receive_message('VISION_POSITION_ESTIMATE')
+            local_pos = self.assert_receive_message('LOCAL_POSITION_NED')
+            z_errors.append(local_pos.z - vicon_pos.z)
+        median_z_error = numpy.median(z_errors)
+        self.progress("Median external-navigation Z error: %.3fm" % median_z_error)
+        if abs(median_z_error) > 0.05:
+            raise NotAchievedException(
+                "External-navigation Z differs from LOCAL_POSITION_NED by %.3fm" % median_z_error)
+
         # The initial samples have unknown covariance and exercise the legacy
-        # scalar fallback.  Switch to anisotropic covariance for the flight.
+        # scalar fallback.  Enable anisotropic noise after the Z datum check so
+        # random measurement noise cannot make that short assertion flaky.
         self.set_parameters({
             "SIM_VICON_PSTD_X": 0.04,
             "SIM_VICON_PSTD_Y": 0.08,
             "SIM_VICON_PSTD_Z": 0.12,
         })
 
-        self.takeoff()
         self.set_rc(1, 1600)
         tstart = self.get_sim_time()
         while True:
