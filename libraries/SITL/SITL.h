@@ -353,6 +353,7 @@ public:
         AP_Vector3f pos_offset;   // XYZ position of the vicon sensor relative to the body frame origin (m)
         AP_Vector3f glitch;   // glitch in meters in vicon's local NED frame
         AP_Float pos_stddev;       // noise in meters in vicon's local NED frame
+        AP_Vector3f pos_stddev_xyz; // per-axis noise in meters in local NED; overrides pos_stddev when nonzero
         AP_Float vel_stddev;       // noise in m/s in vicon's local NED frame
         AP_Int8 fail;         // trigger vicon failure
         AP_Int16 yaw;         // vicon local yaw in degrees

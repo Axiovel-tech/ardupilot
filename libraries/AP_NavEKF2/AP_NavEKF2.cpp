@@ -1522,7 +1522,7 @@ void NavEKF2::updateLaneSwitchPosDownResetData(uint8_t new_primary, uint8_t old_
  *
  * pos        : XYZ position (m) in a RH navigation frame with the Z axis pointing down and XY axes horizontal. Frame must be aligned with NED if the magnetomer is being used for yaw.
  * quat       : quaternion describing the rotation from navigation frame to body frame
- * posErr     : 1-sigma spherical position error (m)
+ * posErr     : external-navigation position errors; EKF2 uses the legacy scalar (m)
  * angErr     : 1-sigma spherical angle error (rad)
  * timeStamp_ms : system time the measurement was taken, not the time it was received (mSec)
  * delay_ms   : average delay of external nav system measurements relative to inertial measurements
@@ -1531,12 +1531,12 @@ void NavEKF2::updateLaneSwitchPosDownResetData(uint8_t new_primary, uint8_t old_
  * Sensor offsets are pulled directly from the AP_VisualOdom library
  *
 */
-void NavEKF2::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
+void NavEKF2::writeExtNavData(const Vector3f &pos, const Quaternion &quat, const ExtNavPositionError &posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
     AP::dal().writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
     if (!option_is_set(Option::DisableExternalNav) && core) {
         for (uint8_t i=0; i<num_cores; i++) {
-            core[i].writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
+            core[i].writeExtNavData(pos, quat, posErr.scalar, angErr, timeStamp_ms, delay_ms, resetTime_ms);
         }
     }
 }

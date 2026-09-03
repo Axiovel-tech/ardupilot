@@ -74,6 +74,7 @@ jobs:
             test.Copter.SetHome \
             test.Copter.InitialMode \
             test.Copter.LoiterToAlt \
+            test.Copter.VisionPosition \
             test.Copter.MAV_CMD_CONDITION_YAW
 
       - name: Upload SITL failure artifacts
