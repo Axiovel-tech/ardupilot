@@ -36,6 +36,12 @@ jobs:
       options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
 
     steps:
+      # The self-hosted runner reuses this workspace across job containers.
+      # Trust the mounted checkout before actions/checkout inspects existing
+      # nested submodules, which may have a UID from the previous container.
+      - name: Trust the disposable runner workspace
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
