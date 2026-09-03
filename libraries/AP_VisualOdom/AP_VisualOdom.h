@@ -26,6 +26,11 @@
 #endif
 #include <AP_Math/AP_Math.h>
 
+// EKF3 historically clamped the external-nav vertical observation noise to this
+// minimum.  Retained as the implicit vertical floor when VISO_ALT_M_NSE is unset,
+// so that leaving the new parameter at zero reproduces the old behaviour exactly.
+#define EXTNAV_LEGACY_ALT_NOISE_FLOOR 0.1f
+
 class AP_VisualOdom_Backend;
 
 #define AP_VISUALODOM_TIMEOUT_MS 300
@@ -33,6 +38,23 @@ class AP_VisualOdom_Backend;
 class AP_VisualOdom
 {
 public:
+
+    // Unique terms of the symmetric 3x3 position covariance supplied by a
+    // pose source.  Values are variances/covariances in m^2 in the same frame
+    // as the reported position.
+    struct PositionCovariance {
+        float xx = NAN;
+        float xy = NAN;
+        float xz = NAN;
+        float yy = NAN;
+        float yz = NAN;
+        float zz = NAN;
+
+        bool has_valid_diagonal() const {
+            return isfinite(xx) && isfinite(yy) && isfinite(zz) &&
+                   xx >= 0.0f && yy >= 0.0f && zz >= 0.0f;
+        }
+    };
 
     AP_VisualOdom();
 
@@ -77,8 +99,41 @@ public:
     // return velocity measurement noise in m/s
     float get_vel_noise() const { return _vel_noise; }
     
-    // return position measurement noise in m
+    // return horizontal position measurement noise in m
     float get_pos_noise() const { return _pos_noise; }
+
+    // return vertical position measurement noise in m.
+    //
+    // When _ALT_M_NSE is left at zero this reproduces the historical behaviour
+    // exactly: a single scalar served both axes, and EKF3 then clamped the
+    // vertical observation noise to a minimum of 0.1m.  Folding that legacy
+    // floor in here keeps the default bit-identical even though EKF3's own
+    // vertical clamp has since been lowered to match the horizontal one.
+    float get_alt_noise() const {
+        if (is_positive(_alt_noise)) {
+            return _alt_noise.get();
+        }
+        return MAX(_pos_noise.get(), EXTNAV_LEGACY_ALT_NOISE_FLOOR);
+    }
+
+    // ratio of vertical to horizontal position noise, used to keep the two axes
+    // separated when the sensor reports its own error rather than relying on
+    // the configured floors.
+    //
+    // Returns exactly 1 when _ALT_M_NSE is unset so that the vertical error
+    // tracks the horizontal one identically to the old single-scalar path; the
+    // legacy 0.1m floor folded into get_alt_noise() must not be allowed to leak
+    // in here as a scale factor.
+    float get_alt_noise_ratio() const {
+        if (!is_positive(_alt_noise)) {
+            return 1.0f;
+        }
+        const float pos_nse = _pos_noise.get();
+        if (!is_positive(pos_nse)) {
+            return 1.0f;
+        }
+        return _alt_noise.get() / pos_nse;
+    }
 
     // return yaw measurement noise in rad
     float get_yaw_noise() const { return _yaw_noise; }
@@ -98,8 +153,8 @@ public:
     // general purpose methods to consume position estimate data and send to EKF
     // distances in meters, roll, pitch and yaw are in radians
     // quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
-    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality);
-    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality);
+    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance = nullptr);
+    void handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality, const PositionCovariance *pos_covariance = nullptr);
     
     // general purpose methods to consume velocity estimate data and send to EKF
     // velocity in NED meters per second
@@ -133,7 +188,8 @@ private:
     AP_Float _pos_scale;        // position scale factor applied to sensor values
     AP_Int16 _delay_ms;         // average delay relative to inertial measurements
     AP_Float _vel_noise;        // velocity measurement noise in m/s
-    AP_Float _pos_noise;        // position measurement noise in meters
+    AP_Float _pos_noise;        // horizontal position measurement noise in meters
+    AP_Float _alt_noise;        // vertical position measurement noise in meters (0 = use _pos_noise)
     AP_Float _yaw_noise;        // yaw measurement noise in radians
     AP_Int8 _quality_min;       // positions and velocities will only be sent to EKF if over this value.  if 0 all values sent to EKF
 

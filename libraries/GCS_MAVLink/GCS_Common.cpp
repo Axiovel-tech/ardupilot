@@ -4012,6 +4012,18 @@ void GCS_MAVLINK::handle_data_packet(const mavlink_message_t &msg)
 }
 
 #if HAL_VISUALODOM_ENABLED
+static AP_VisualOdom::PositionCovariance get_position_covariance(const float covariance[21])
+{
+    AP_VisualOdom::PositionCovariance position_covariance;
+    position_covariance.xx = covariance[0];
+    position_covariance.xy = covariance[1];
+    position_covariance.xz = covariance[2];
+    position_covariance.yy = covariance[6];
+    position_covariance.yz = covariance[7];
+    position_covariance.zz = covariance[11];
+    return position_covariance;
+}
+
 void GCS_MAVLINK::handle_vision_position_delta(const mavlink_message_t &msg)
 {
     AP_VisualOdom *visual_odom = AP::visualodom();
@@ -4071,6 +4083,7 @@ void GCS_MAVLINK::handle_odometry(const mavlink_message_t &msg)
 
     Quaternion q{m.q[0],m.q[1],m.q[2],m.q[3]};
 
+    const AP_VisualOdom::PositionCovariance pos_covariance = get_position_covariance(m.pose_covariance);
     float posErr = 0;
     float angErr = 0;
     if (!isnan(m.pose_covariance[0])) {
@@ -4079,7 +4092,7 @@ void GCS_MAVLINK::handle_odometry(const mavlink_message_t &msg)
     }
 
     const uint32_t timestamp_ms = correct_offboard_timestamp_usec_to_ms(m.time_usec, PAYLOAD_SIZE(chan, ODOMETRY));
-    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, q, posErr, angErr, m.reset_counter, m.quality);
+    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, q, posErr, angErr, m.reset_counter, m.quality, &pos_covariance);
 
     // convert velocity vector from FRD to NED frame
     Vector3f vel{m.vx, m.vy, m.vz};
@@ -4101,6 +4114,7 @@ void GCS_MAVLINK::handle_common_vision_position_estimate_data(const uint64_t use
                                                               const uint8_t reset_counter,
                                                               const uint16_t payload_size)
 {
+    const AP_VisualOdom::PositionCovariance pos_covariance = get_position_covariance(covariance);
     float posErr = 0;
     float angErr = 0;
     // correct offboard timestamp to be in local ms since boot
@@ -4116,7 +4130,7 @@ void GCS_MAVLINK::handle_common_vision_position_estimate_data(const uint64_t use
         angErr = sqrtf(covariance[15]+covariance[18]+covariance[20]);
     }
 
-    visual_odom->handle_pose_estimate(usec, timestamp_ms, x, y, z, roll, pitch, yaw, posErr, angErr, reset_counter, 0);
+    visual_odom->handle_pose_estimate(usec, timestamp_ms, x, y, z, roll, pitch, yaw, posErr, angErr, reset_counter, 0, &pos_covariance);
 }
 
 void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
@@ -4132,6 +4146,7 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
         return;
     }
 
+    const AP_VisualOdom::PositionCovariance pos_covariance = get_position_covariance(m.covariance);
     float posErr = 0;
     float angErr = 0;
     if (!isnan(m.covariance[0])) {
@@ -4140,7 +4155,7 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
     }
 
     // note: att_pos_mocap does not include reset counter
-    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, posErr, angErr, 0, 0);
+    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, posErr, angErr, 0, 0, &pos_covariance);
 }
 
 void GCS_MAVLINK::handle_vision_speed_estimate(const mavlink_message_t &msg)
