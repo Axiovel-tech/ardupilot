@@ -4501,14 +4501,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.mav.mav.system_time_send(int(time.time() * 1000000), 0)
         self.set_origin(old_pos)
 
-        # The initial samples have unknown covariance and exercise the legacy
-        # scalar fallback.  Switch to anisotropic covariance for the flight.
-        self.set_parameters({
-            "SIM_VICON_PSTD_X": 0.04,
-            "SIM_VICON_PSTD_Y": 0.08,
-            "SIM_VICON_PSTD_Z": 0.12,
-        })
-
         self.takeoff()
 
         # External navigation and LOCAL_POSITION_NED are both relative to the
@@ -4527,6 +4519,15 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         if abs(median_z_error) > 0.05:
             raise NotAchievedException(
                 "External-navigation Z differs from LOCAL_POSITION_NED by %.3fm" % median_z_error)
+
+        # The initial samples have unknown covariance and exercise the legacy
+        # scalar fallback.  Enable anisotropic noise after the Z datum check so
+        # random measurement noise cannot make that short assertion flaky.
+        self.set_parameters({
+            "SIM_VICON_PSTD_X": 0.04,
+            "SIM_VICON_PSTD_Y": 0.08,
+            "SIM_VICON_PSTD_Z": 0.12,
+        })
 
         self.set_rc(1, 1600)
         tstart = self.get_sim_time()
