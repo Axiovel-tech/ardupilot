@@ -4550,6 +4550,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         fallback_samples = 0
         covariance_samples = 0
         covariance_active = False
+        covariance_active_remote_time_us = 0
         while True:
             msg = mlog.recv_match(type="VISC")
             if msg is None:
@@ -4563,8 +4564,10 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                 continue
             # AP_Vector3f components are set as three MAVLink parameters, so
             # Vicon can emit a few partial covariance samples while X/Y/Z are
-            # being updated.  Start strict validation at the first complete
-            # matrix; every subsequent sample must remain exact.
+            # being updated.  Random simulated transport delays can deliver
+            # an older partial sample after the first complete matrix.  Use
+            # the source timestamp to ignore only those older samples, then
+            # validate every matrix produced after the transition.
             if not covariance_active:
                 covariance_active = all(
                     math.isclose(getattr(msg, field), value,
@@ -4573,6 +4576,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                 )
                 if not covariance_active:
                     continue
+                covariance_active_remote_time_us = msg.RTimeUS
+            elif msg.RTimeUS < covariance_active_remote_time_us:
+                continue
             covariance_samples += 1
             for field, value in expected.items():
                 if not math.isclose(getattr(msg, field), value, rel_tol=1e-5, abs_tol=1e-6):
