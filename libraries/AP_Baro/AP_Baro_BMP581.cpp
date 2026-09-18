@@ -54,6 +54,26 @@ extern const AP_HAL::HAL &hal;
 #define BMP581_REG_OSR_EFF            0x38
 #define BMP581_REG_CMD                0x7E
 
+#define BMP581_CMD_SOFT_RESET         0xB6
+
+// STATUS register (0x28) bits
+#define BMP581_STATUS_NVM_RDY         (1U << 1)
+#define BMP581_STATUS_NVM_ERR         (1U << 2)
+
+// INT_STATUS register (0x27): set on power-on or soft reset, cleared on read
+#define BMP581_INT_STATUS_POR         (1U << 4)
+
+// datasheet soft-reset duration is 2ms; use a margin
+#define BMP581_RESET_DELAY_MS         5
+
+// Keep both sensor output and host polling at 50Hz. 64x pressure OSR only
+// supports 20Hz: at 50Hz the sensor silently falls back to 2x/2x instead.
+// 16x pressure / 4x temperature is valid up to 80Hz (datasheet table 7).
+#define BMP581_OSR_CONFIG             ((1U << 6) | (4U << 3) | 2U)
+#define BMP581_ODR_CONFIG             ((0x0FU << 2) | 1U)
+#define BMP581_OSR_EFF_MASK           0xBFU
+#define BMP581_OSR_EFF_EXPECTED       ((1U << 7) | (4U << 3) | 2U)
+
 AP_Baro_BMP581::AP_Baro_BMP581(AP_Baro &baro, AP_HAL::Device &dev)
     : AP_Baro_Backend(baro)
     , _dev(&dev)
@@ -103,12 +123,35 @@ bool AP_Baro_BMP581::init()
         return false;
     }
 
+    // On a warm reboot the MCU restarts but the BMP581 can stay powered, and
+    // init() then rejects a working sensor: STATUS reads 0x01 (core_rdy=1,
+    // nvm_rdy=0, nvm_err=0) and the INT_STATUS POR bit is 0, though pressure
+    // output is still valid. Reset establishes a known startup state so the
+    // STATUS/INT_STATUS checks below apply to a freshly reset sensor rather
+    // than one left measuring by the previous boot. The I2C reset write may not be
+    // ACKed, so its result is intentionally ignored; the reads below confirm
+    // the state.
+    _dev->write_register(BMP581_REG_CMD, BMP581_CMD_SOFT_RESET);
+    hal.scheduler->delay(BMP581_RESET_DELAY_MS);
+
+    // A soft reset drops SPI back to the chip's default interface. The first
+    // SPI read afterwards is a dummy whose value is discarded to re-lock SPI;
+    // then confirm the ID still reads back before continuing.
+    if (_dev->bus_type() == AP_HAL::Device::BUS_TYPE_SPI) {
+        uint8_t dummy;
+        _dev->read_registers(BMP581_REG_CHIP_ID, &dummy, 1);
+
+        if (!_dev->read_registers(BMP581_REG_CHIP_ID, &whoami, 1) || whoami != BMP581_ID) {
+            return false;
+        }
+    }
+
     uint8_t status;
     if (!_dev->read_registers(BMP581_REG_STATUS, &status, 1)) {
         return false;
     }
 
-    if ((status & 0b10) == 0 || (status & 0b100)) {
+    if ((status & BMP581_STATUS_NVM_RDY) == 0 || (status & BMP581_STATUS_NVM_ERR)) {
         return false;
     }
 
@@ -117,20 +160,37 @@ bool AP_Baro_BMP581::init()
         return false;
     }
 
-    if ((int_status & 0x10) == 0) {
+    if ((int_status & BMP581_INT_STATUS_POR) == 0) {
         return false;
     }
 
-    _dev->setup_checked_registers(4);
+    if (!_dev->setup_checked_registers(2)) {
+        return false;
+    }
 
-    // Standby mode
-    _dev->write_register(BMP581_REG_ODR_CONFIG, 0, true);
+    // Standby is transient, not a checked runtime setting. Allow the maximum
+    // 2.5ms transition time before requesting another mode (datasheet 4.3.7).
+    if (!_dev->write_register(BMP581_REG_ODR_CONFIG, 0)) {
+        return false;
+    }
+    hal.scheduler->delay(3);
 
-    // Press EN | osr_p 64X | osr_t 4X
-    _dev->write_register(BMP581_REG_OSR_CONFIG, 0b01110010, true);
+    if (!_dev->write_register(BMP581_REG_OSR_CONFIG, BMP581_OSR_CONFIG, true) ||
+        !_dev->write_register(BMP581_REG_ODR_CONFIG, BMP581_ODR_CONFIG, true)) {
+        return false;
+    }
 
-    // ORD 50Hz | Normal Mode
-    _dev->write_register(BMP581_REG_ODR_CONFIG, 0b0111101, true);
+    // Allow startup and a measurement period before checking the effective
+    // configuration. ACKed writes alone do not prove the settings took effect.
+    hal.scheduler->delay(25);
+    uint8_t config[2];
+    uint8_t osr_eff;
+    if (!_dev->read_registers(BMP581_REG_OSR_CONFIG, config, sizeof(config)) ||
+        config[0] != BMP581_OSR_CONFIG || config[1] != BMP581_ODR_CONFIG ||
+        !_dev->read_registers(BMP581_REG_OSR_EFF, &osr_eff, 1) ||
+        (osr_eff & BMP581_OSR_EFF_MASK) != BMP581_OSR_EFF_EXPECTED) {
+        return false;
+    }
 
     instance = _frontend.register_sensor();
 
@@ -145,6 +205,12 @@ bool AP_Baro_BMP581::init()
 // acumulate a new sensor reading
 void AP_Baro_BMP581::timer(void)
 {
+    // Keep configuration recovery running even when sample reads fail or
+    // disagree; otherwise those early returns can starve register checking.
+    if (!_dev->check_next_register()) {
+        return;
+    }
+
     uint8_t buf[6];
     uint8_t buf2[6];
 
@@ -157,8 +223,14 @@ void AP_Baro_BMP581::timer(void)
         return;
     }
     if (memcmp(buf, buf2, ARRAY_SIZE(buf)) != 0) {
-        // we didn't get the same data twice.  Reject.
-        return;
+        // we didn't get the same data twice.  Reject.  See if we can
+        // get a third measurement to match the second:
+        if (!_dev->read_registers(BMP581_REG_TEMP_DATA_XLSB, buf, sizeof(buf))) {
+            return;
+        }
+        if (memcmp(buf, buf2, ARRAY_SIZE(buf)) != 0) {
+            return;
+        }
     }
 
     WITH_SEMAPHORE(_sem);
@@ -173,8 +245,6 @@ void AP_Baro_BMP581::timer(void)
         pressure_sum += (float)(((uint32_t)buf[5] << 16) | ((uint32_t)buf[4] << 8) | (uint32_t)buf[3]) * (1.0f / 64.0f);
         pressure_count++;
     }
-
-    _dev->check_next_register();
 }
 
 // transfer data to the frontend
