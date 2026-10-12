@@ -484,6 +484,12 @@ void AC_DroneShowManager::_check_changes_in_parameters()
             _start_time_on_internal_clock_usec = 0;
             _start_time_requested_by = StartTimeSource::NONE;
         }
+    } else if (new_start_time_pending && uses_show_clock_for_show_start()) {
+        // The changed start stays pending until the show clock is back, and
+        // the previous start must not fire in its place meanwhile
+        _start_time_on_show_clock_usec = 0;
+        _start_time_on_internal_clock_usec = 0;
+        _start_time_requested_by = StartTimeSource::NONE;
     }
 
     if (new_show_authorization_pending) {
