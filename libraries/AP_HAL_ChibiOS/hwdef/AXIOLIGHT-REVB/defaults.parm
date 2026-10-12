@@ -289,9 +289,10 @@ SERIAL7_BAUD,115
 SERIAL8_PROTOCOL,2
 SERIAL8_BAUD,921
 
-# Drone show behavior: internal-clock start sync (indoor, no GPS time),
-# 1 m show takeoff altitude, and 50 Hz trajectory target updates
-SHOW_SYNC_MODE,0
+# Drone show behavior: start scheduled on the tag's show clock and run on the
+# internal clock (indoor, no GPS), 1 m show takeoff altitude, and 50 Hz
+# trajectory target updates
+SHOW_SYNC_MODE,2
 SHOW_TAKEOFF_ALT,1
 SHOW_CTRL_RATE,50
 
