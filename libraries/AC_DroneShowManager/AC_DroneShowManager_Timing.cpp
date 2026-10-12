@@ -191,8 +191,8 @@ void AC_DroneShowManager::_set_start_time_on_show_clock(uint32_t time_of_week_ms
     }
 
     _start_time_on_show_clock_usec = start_usec;
-    _start_time_on_show_clock_committed = false;
-    _update_start_time_from_show_clock();
+    _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(start_usec);
+    _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
 }
 
 void AC_DroneShowManager::_update_start_time_from_show_clock()
@@ -201,14 +201,15 @@ void AC_DroneShowManager::_update_start_time_from_show_clock()
         return;
     }
 
-    // Without fresh samples we keep the last mapping and still commit on time
-    if (_show_clock.is_valid()) {
+    // The drone show mode runs more often than this update and may already
+    // have acted on a start within the commit lead (barometer calibration),
+    // so such a start is frozen as it is. Without fresh samples we keep the
+    // last mapping and still commit on time.
+    if (get_time_until_start_usec() > SHOW_CLOCK_COMMIT_BEFORE_START_USEC && _show_clock.is_valid()) {
         _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(_start_time_on_show_clock_usec);
     }
 
-    if (get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC) {
-        _start_time_on_show_clock_committed = true;
-    }
+    _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
 }
 
 AC_DroneShowManager::ShowClock::ShowClock() :
