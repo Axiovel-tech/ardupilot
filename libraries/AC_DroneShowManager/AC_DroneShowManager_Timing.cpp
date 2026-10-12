@@ -3,6 +3,13 @@
 #include "AC_DroneShowManager.h"
 #include "AC_DroneShowManager/DroneShow_Enums.h"
 
+// Time before the start when a start scheduled on the show clock is frozen on
+// the internal clock; the drone show mode calibrates the barometer at the
+// same lead time before takeoff.
+static constexpr int64_t SHOW_CLOCK_COMMIT_BEFORE_START_USEC = 10000000;
+
+static constexpr uint64_t USEC_PER_WEEK = AP_MSEC_PER_WEEK * 1000ULL;
+
 static uint64_t get_gps_timestamp_usec();
 static bool is_safe_to_change_start_time_in_stage(DroneShowModeStage stage);
 
@@ -139,6 +146,12 @@ uint32_t AC_DroneShowManager::_get_gps_synced_timestamp_in_millis_for_lights() c
         }
     }
 
+    // The show clock is the fleet-wide reference when we have one, so idle
+    // signals blink in phase across the fleet even without a scheduled start.
+    if (uses_show_clock_for_show_start() && _show_clock.is_valid()) {
+        return _show_clock.local_to_show_usec(AP_HAL::micros64()) / 1000;
+    }
+
     // No need to worry about loss of GPS fix; AP::gps().time_epoch_usec() is
     // smart enough to extrapolate from the timestamp of the latest fix.
     //
@@ -159,6 +172,73 @@ bool AC_DroneShowManager::_is_gps_time_ok() const
     // that the GPS subsystem receives iTOW information from the GPS module but
     // no week number; we deem this unreliable so we return false in this case.
     return AP::gps().time_week() > 0;
+}
+
+bool AC_DroneShowManager::_is_start_time_reference_ok() const
+{
+    return uses_show_clock_for_show_start() ? _show_clock.is_valid() : _is_gps_time_ok();
+}
+
+void AC_DroneShowManager::_set_start_time_on_show_clock(uint32_t time_of_week_msec)
+{
+    const uint64_t now_usec = _show_clock.local_to_show_usec(AP_HAL::micros64());
+    uint64_t start_usec = now_usec - (now_usec % USEC_PER_WEEK) + time_of_week_msec * 1000ULL;
+
+    // Same week resolution as with GPS time: a time of week that is not in
+    // the future refers to the next week
+    if (start_usec <= now_usec) {
+        start_usec += USEC_PER_WEEK;
+    }
+
+    _start_time_on_show_clock_usec = start_usec;
+    _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(start_usec);
+    _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
+}
+
+void AC_DroneShowManager::_update_start_time_from_show_clock()
+{
+    if (_start_time_on_show_clock_usec == 0 || _start_time_on_show_clock_committed) {
+        return;
+    }
+
+    // The drone show mode runs more often than this update and may already
+    // have acted on a start within the commit lead (barometer calibration),
+    // so such a start is frozen as it is. Without fresh samples we keep the
+    // last mapping and still commit on time.
+    if (get_time_until_start_usec() > SHOW_CLOCK_COMMIT_BEFORE_START_USEC && _show_clock.is_valid()) {
+        _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(_start_time_on_show_clock_usec);
+    }
+
+    _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
+}
+
+AC_DroneShowManager::ShowClock::ShowClock() :
+    _jitter_correction(MAX_LAG_MSEC, FILTER_WINDOW_SAMPLES),
+    _last_sample_at_msec(0),
+    _has_sample(false)
+{
+}
+
+void AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
+{
+    _jitter_correction.correct_offboard_timestamp_usec(show_time_usec, local_usec);
+    _last_sample_at_msec = AP_HAL::millis();
+    _has_sample = true;
+}
+
+bool AC_DroneShowManager::ShowClock::is_valid() const
+{
+    return _has_sample && AP_HAL::millis() - _last_sample_at_msec < TIMEOUT_MSEC;
+}
+
+uint64_t AC_DroneShowManager::ShowClock::local_to_show_usec(uint64_t local_usec) const
+{
+    return local_usec - _jitter_correction.get_link_offset_usec();
+}
+
+uint64_t AC_DroneShowManager::ShowClock::show_to_local_usec(uint64_t show_usec) const
+{
+    return show_usec + _jitter_correction.get_link_offset_usec();
 }
 
 bool AC_DroneShowManager::_is_safe_to_change_start_time_in_current_stage() const {

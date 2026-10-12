@@ -21,6 +21,7 @@ namespace CustomPackets {
     static const uint8_t SIMPLE_GEOFENCE_SETUP = 3;
     static const uint8_t ACKNOWLEDGMENT = 4;
     static const uint8_t TIME_AXIS_CONFIG = 5;
+    static const uint8_t AXIO_SHOW_CLOCK = 0x41;
 
     static const uint8_t DRONE_TO_GCS_STATUS = 0x5b;
     static const uint8_t GCS_TO_DRONE = 0x5c;
@@ -72,6 +73,12 @@ namespace CustomPackets {
             uint16_t start_time_msec_offset;
         } v3_extended_part;
     } start_config_t;
+
+    typedef struct PACKED {
+        // Show clock time sampled by the positioning tag just before
+        // transmission, in microseconds since the GPS epoch (no leap seconds)
+        uint64_t gps_time_usec;
+    } axio_show_clock_t;
 
     typedef struct PACKED {
         // Number of points in the polygon geofence; zero means that the polygon

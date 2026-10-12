@@ -8,6 +8,7 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_Notify/RGBLed.h>
 #include <AP_Param/AP_Param.h>
+#include <AP_RTC/JitterCorrection.h>
 
 #include <AC_BubbleFence/AC_BubbleFence.h>
 #include <AC_HardFence/AC_HardFence.h>
@@ -97,6 +98,29 @@ private:
 
         // Time between consecutive channel tests, in milliseconds
         uint32_t delta_msec;
+    };
+
+    // Maps the show clock (microseconds since the GPS epoch, received from the
+    // positioning tag in AXIO_SHOW_CLOCK packets) onto AP_HAL::micros64(),
+    // using the lowest-latency sample of a short window of samples.
+    class ShowClock {
+    public:
+        ShowClock();
+
+        void handle_sample(uint64_t show_time_usec, uint64_t local_usec);
+        bool is_valid() const;
+        uint64_t local_to_show_usec(uint64_t local_usec) const;
+        uint64_t show_to_local_usec(uint64_t show_usec) const;
+
+    private:
+        // The tag sends samples at about 10 Hz, so 20 samples span ~2 s
+        static constexpr uint16_t FILTER_WINDOW_SAMPLES = 20;
+        static constexpr uint16_t MAX_LAG_MSEC = 500;
+        static constexpr uint32_t TIMEOUT_MSEC = 2000;
+
+        JitterCorrection _jitter_correction;
+        uint32_t _last_sample_at_msec;
+        bool _has_sample;
     };
 
 public:
@@ -249,15 +273,26 @@ public:
     const TelemetryRequest* get_preferred_telemetry_messages() const;
 
     // Returns the start time in microseconds. Depending on the value of the
-    // SHOW_SYNC_MODE parameter, this might be an internal timestamp or a
-    // UNIX timestamp. Do _not_ use this method for anything else than
-    // determining whether the start time was changed.
+    // SHOW_SYNC_MODE parameter, this might be an internal timestamp, a
+    // UNIX timestamp or a show clock timestamp. Do _not_ use this method for
+    // anything else than determining whether the start time was changed.
     uint64_t get_start_time_epoch_undefined() const {
-        return (
-            _params.time_sync_mode == TimeSyncMode_Countdown
-            ? _start_time_on_internal_clock_usec
-            : _start_time_unix_usec
-        );
+        switch (_params.time_sync_mode) {
+            case TimeSyncMode_Countdown:
+                return _start_time_on_internal_clock_usec;
+
+            case TimeSyncMode_ShowClock:
+                // The internal start time is refined continuously until the
+                // commit point, so it would report spurious changes
+                return (
+                    _start_time_on_show_clock_usec > 0
+                    ? _start_time_on_show_clock_usec
+                    : _start_time_on_internal_clock_usec
+                );
+
+            default:
+                return _start_time_unix_usec;
+        }
     }
 
     // Returns the number of seconds elapsed since show start, in microseconds (wall clock time)
@@ -529,6 +564,9 @@ public:
 
     // Returns whether the manager uses GPS time to start the show
     bool uses_gps_time_for_show_start() const { return _params.time_sync_mode == TimeSyncMode_GPS; }
+
+    // Returns whether the manager schedules the start of the show on the show clock
+    bool uses_show_clock_for_show_start() const { return _params.time_sync_mode == TimeSyncMode_ShowClock; }
     
     // Writes a message containing the trigger of a collective RTL maneuver into the log
     void write_crth_trigger_log_message(float rth_start_time_sec, sb_vector3_t start) const;
@@ -769,6 +807,25 @@ private:
     // synchronized across drones.
     uint64_t _start_time_unix_usec;
 
+    // Start time of the show on the show clock (microseconds since the GPS
+    // epoch), zero if unset or if the start was set on the internal clock
+    // (e.g. with the RC switch). Used only in TimeSyncMode_ShowClock, where
+    // the show runs on _start_time_on_internal_clock_usec, which is derived
+    // from this value until the start is committed.
+    uint64_t _start_time_on_show_clock_usec;
+
+    // Whether _start_time_on_internal_clock_usec is frozen because the start
+    // scheduled on the show clock is close; from then on the show runs on the
+    // internal clock only, whatever happens to the show clock.
+    bool _start_time_on_show_clock_committed;
+
+    // Mapping between the show clock and the internal clock
+    ShowClock _show_clock;
+
+    // SHOW_START_TIME and SHOW_START_MSEC values that were last acted upon
+    int32_t _last_seen_start_time_gps_sec;
+    int16_t _last_seen_start_time_gps_msec_offset;
+
     // Takeoff position, in local coordinates, relative to the show coordinate system.
     // Zero if no show data is loaded. Units are in millimeters.
     Vector3f _takeoff_position_mm;
@@ -984,6 +1041,9 @@ private:
     // Handles a MAVLink LED_CONTROL message from the ground station.
     bool _handle_led_control_message(const mavlink_message_t& msg);
 
+    // Handles a show clock packet from the positioning tag
+    bool _handle_show_clock_packet(void* data, uint8_t length);
+
     // Handles a start time configuration packet
     bool _handle_start_time_configuration_packet(void* data, uint8_t length);
 
@@ -1023,6 +1083,10 @@ private:
     // that it has accurate tiem information.
     bool _is_gps_time_ok() const;
 
+    // Returns whether the time reference that SHOW_START_TIME refers to (GPS
+    // time or the show clock, depending on SHOW_SYNC_MODE) is available
+    bool _is_start_time_reference_ok() const;
+
     // Returns whether pyro events can be handled safely in the current state
     bool _is_pyro_safe_to_fire() const;
 
@@ -1052,6 +1116,14 @@ private:
 
     bool _load_show_file_from_storage();
     void _set_show_data_and_take_ownership(uint8_t *value);
+
+    // Schedules the start at the given time of the current or next week on
+    // the show clock (whichever is in the future). The show clock must be valid.
+    void _set_start_time_on_show_clock(uint32_t time_of_week_msec);
+
+    // Re-derives the internal start time from the show clock start time until
+    // the start is committed. This has to be called regularly from update().
+    void _update_start_time_from_show_clock();
 
     // Triggers pending events from the event list of the show
     void _trigger_show_events();

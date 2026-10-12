@@ -40,6 +40,10 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _start_time_requested_by(StartTimeSource::NONE),
     _start_time_on_internal_clock_usec(0),
     _start_time_unix_usec(0),
+    _start_time_on_show_clock_usec(0),
+    _start_time_on_show_clock_committed(false),
+    _last_seen_start_time_gps_sec(-1),
+    _last_seen_start_time_gps_msec_offset(0),
     _stage_in_drone_show_mode(DroneShow_Off),
     _trajectory_is_circular(false),
     _controller_update_delta_msec(1000 / DEFAULT_UPDATE_RATE_HZ),
@@ -131,6 +135,7 @@ bool AC_DroneShowManager::clear_scheduled_start_time(bool force)
     _start_time_on_internal_clock_usec = 0;
     _start_time_requested_by = StartTimeSource::NONE;
     _start_time_unix_usec = 0;
+    _start_time_on_show_clock_usec = 0;
 
     return true;
 }
@@ -503,6 +508,14 @@ bool AC_DroneShowManager::schedule_delayed_start_after(uint32_t delay_ms)
         }
     } else {
         _start_time_on_internal_clock_usec = AP_HAL::micros64() + (delay_ms * 1000);
+        _start_time_on_show_clock_usec = 0;
+        if (uses_show_clock_for_show_start()) {
+            // This start now owns the schedule; consume a start time that is
+            // still waiting for the show clock so that it cannot replace this
+            // one when the clock comes back or the GCS repeats it
+            _last_seen_start_time_gps_sec = _params.start_time_gps_sec;
+            _last_seen_start_time_gps_msec_offset = _params.start_time_gps_msec_offset;
+        }
         success = true;
     }
 
@@ -546,6 +559,7 @@ void AC_DroneShowManager::update()
     // improves. Everything else keeps its original 25 Hz alternating cadence.
     if (main_cycle) {
         _check_changes_in_parameters();
+        _update_start_time_from_show_clock();
         _check_events();
         _check_radio_failsafe();
         _update_preflight_check_result();
