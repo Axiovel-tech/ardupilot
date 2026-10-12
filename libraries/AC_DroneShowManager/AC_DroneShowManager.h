@@ -822,6 +822,10 @@ private:
     // Mapping between the show clock and the internal clock
     ShowClock _show_clock;
 
+    // SHOW_START_TIME and SHOW_START_MSEC values that were last acted upon
+    int32_t _last_seen_start_time_gps_sec;
+    int16_t _last_seen_start_time_gps_msec_offset;
+
     // Takeoff position, in local coordinates, relative to the show coordinate system.
     // Zero if no show data is loaded. Units are in millimeters.
     Vector3f _takeoff_position_mm;

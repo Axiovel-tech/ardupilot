@@ -401,8 +401,6 @@ bool AC_DroneShowManager::should_switch_to_show_mode_when_authorized() const
 
 void AC_DroneShowManager::_check_changes_in_parameters()
 {
-    static int32_t last_seen_start_time_gps_sec = -1;
-    static int16_t last_seen_start_time_gps_msec_offset = 0;
     static bool last_seen_show_authorization_state = false;
     static int16_t last_seen_control_rate_hz = DEFAULT_UPDATE_RATE_HZ;
     static int32_t last_seen_origin_lat = 200000000;        // intentionally invalid
@@ -419,8 +417,8 @@ void AC_DroneShowManager::_check_changes_in_parameters()
         !is_zero(_params.orientation_deg - last_seen_orientation_deg)
     );
     bool new_start_time_pending = (
-        _params.start_time_gps_sec != last_seen_start_time_gps_sec ||
-        _params.start_time_gps_msec_offset != last_seen_start_time_gps_msec_offset
+        _params.start_time_gps_sec != _last_seen_start_time_gps_sec ||
+        _params.start_time_gps_msec_offset != _last_seen_start_time_gps_msec_offset
     );
     bool new_show_authorization_pending = _params.authorization != last_seen_show_authorization_state;
 
@@ -449,11 +447,11 @@ void AC_DroneShowManager::_check_changes_in_parameters()
     }
 
     if (new_start_time_pending && (_is_start_time_reference_ok() || _params.start_time_gps_sec < 0)) {
-        last_seen_start_time_gps_sec = _params.start_time_gps_sec;
-        last_seen_start_time_gps_msec_offset = _params.start_time_gps_msec_offset;
+        _last_seen_start_time_gps_sec = _params.start_time_gps_sec;
+        _last_seen_start_time_gps_msec_offset = _params.start_time_gps_msec_offset;
 
-        if (last_seen_start_time_gps_sec >= 0) {
-            start_time_gps_msec = last_seen_start_time_gps_sec * 1000 + last_seen_start_time_gps_msec_offset;
+        if (_last_seen_start_time_gps_sec >= 0) {
+            start_time_gps_msec = _last_seen_start_time_gps_sec * 1000 + _last_seen_start_time_gps_msec_offset;
 
             if (uses_show_clock_for_show_start()) {
                 _set_start_time_on_show_clock(start_time_gps_msec);
