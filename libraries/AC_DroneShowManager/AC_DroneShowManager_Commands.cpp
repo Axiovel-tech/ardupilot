@@ -228,6 +228,11 @@ bool AC_DroneShowManager::_handle_custom_data_message(mavlink_channel_t chan, ui
         case CustomPackets::TIME_AXIS_CONFIG:
             handled = _handle_time_axis_configuration_packet(data, length);
             break;
+
+        // Show clock broadcast by the positioning tag on the flight controller link
+        case CustomPackets::AXIO_SHOW_CLOCK:
+            handled = _handle_show_clock_packet(data, length);
+            break;
     }
 
     if (handled && needs_reply) {
@@ -324,6 +329,18 @@ bool AC_DroneShowManager::_handle_geofence_setup_packet(void* data, uint8_t leng
     return true;
 }
 
+bool AC_DroneShowManager::_handle_show_clock_packet(void* data, uint8_t length)
+{
+    if (length < sizeof(CustomPackets::axio_show_clock_t)) {
+        return false;
+    }
+
+    const CustomPackets::axio_show_clock_t* show_clock = static_cast<CustomPackets::axio_show_clock_t*>(data);
+    _show_clock.handle_sample(show_clock->gps_time_usec, AP_HAL::micros64());
+
+    return true;
+}
+
 bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, uint8_t length)
 {
     if (length < offsetof(CustomPackets::start_config_t, v2_extended_part)) {
@@ -354,6 +371,11 @@ bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, ui
     if (start_config->start_time < 0) {
         // Clear start time
         set_scheduled_start_time_in_gps_time_of_week(-1, 0);
+        if (uses_show_clock_for_show_start()) {
+            // A start set with the RC switch lives on the internal clock only;
+            // clear it the same way as the countdown does in countdown mode
+            clear_scheduled_start_time();
+        }
     } else if (start_config->start_time >= GPS_WEEK_LENGTH_SEC) {
         // Do not change start time
     } else {
@@ -393,7 +415,7 @@ bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, ui
         // part exists and is positive, _and_ we are using the internal
         // clock to synchronize the start, then we update the start
         // time based on this
-        if (!uses_gps_time_for_show_start()) {
+        if (!uses_gps_time_for_show_start() && !uses_show_clock_for_show_start()) {
             int32_t countdown_msec = start_config->v2_extended_part.countdown_msec;
 
             if (countdown_msec == 0x7FFFFFFF) {

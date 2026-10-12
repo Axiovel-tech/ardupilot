@@ -144,7 +144,10 @@ uint8_t* AC_DroneShowManager::_fill_drone_show_status_packet_buffer(uint8_t* buf
         // versions
         flags |= (1 << 2);
     }
-    if (uses_gps_time_for_show_start() && !_is_gps_time_ok()) {
+    if (
+        (uses_gps_time_for_show_start() || uses_show_clock_for_show_start()) &&
+        !_is_start_time_reference_ok()
+    ) {
         flags |= (1 << 1);
     }
     if (AP::fence()->get_breaches()) {
