@@ -959,6 +959,10 @@ void Copter::update_super_simple_bearing(bool force_update)
 
 void Copter::read_AHRS(void)
 {
+    ahrs.set_motors_thrusting(motors->armed() &&
+                              motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED &&
+                              motors->get_throttle() > 0.03f);
+
     // we tell AHRS to skip INS update as we have already done it in FAST_TASK.
     ahrs.update(true);
 }
