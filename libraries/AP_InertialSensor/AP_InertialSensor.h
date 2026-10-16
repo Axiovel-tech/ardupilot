@@ -152,6 +152,9 @@ public:
     bool accel_calibrated_ok_all() const;
     bool use_accel(uint8_t instance) const;
 
+    // physical gyro whose samples an instance carries
+    uint8_t get_physical_gyro(uint8_t instance) const { return physical_gyro(instance); }
+
     // get observed sensor rates, including any internal sampling multiplier
     uint16_t get_gyro_rate_hz(uint8_t instance) const { return uint16_t(_gyro_raw_sample_rates[instance] * _gyro_over_sampling[instance]); }
     uint16_t get_accel_rate_hz(uint8_t instance) const { return uint16_t(_accel_raw_sample_rates[instance] * _accel_over_sampling[instance]); }
