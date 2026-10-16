@@ -151,10 +151,10 @@ public:
     uint8_t get_accel_count(void) const { return MIN(INS_MAX_INSTANCES, _accel_count + virtual_imu_count()); }
     bool accel_calibrated_ok_all() const;
     bool use_accel(uint8_t instance) const;
-    // true if the instance is the averaged one and it averaged both accels in the last update
+    // true if the instance is the averaged one and it averaged both accels in every update of the last second
     bool accel_averaged(uint8_t instance) const {
 #if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
-        return is_virtual_imu(instance) && _virtual_imu.accel_mask == 0b11;
+        return is_virtual_imu(instance) && AP_HAL::millis() - _virtual_imu.not_averaged_ms >= 1000;
 #else
         return false;
 #endif
@@ -526,6 +526,7 @@ private:
         bool gate_latched;
         uint32_t gate_pending_ms;
         uint32_t degraded_count;
+        uint32_t not_averaged_ms;
     } _virtual_imu;
 #else
     uint8_t virtual_imu_count() const { return 0; }

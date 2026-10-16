@@ -2089,6 +2089,7 @@ void AP_InertialSensor::update_virtual_imu()
     }
     if (mask != 0b11) {
         v.degraded_count++;
+        v.not_averaged_ms = now_ms;
     }
     v.accel_mask = mask;
 
