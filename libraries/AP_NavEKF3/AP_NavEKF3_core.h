@@ -489,6 +489,7 @@ private:
     class NavEKF3 *frontend;
     uint8_t imu_index; // preferred IMU index
     uint8_t gyro_index_active; // active gyro index (in case preferred fails)
+    uint8_t gyro_physical_active; // physical gyro behind gyro_index_active
     uint8_t accel_index_active; // active accel index (in case preferred fails)
     uint8_t core_index;
     uint8_t imu_buffer_length;

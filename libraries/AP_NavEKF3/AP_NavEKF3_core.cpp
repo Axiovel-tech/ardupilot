@@ -22,6 +22,7 @@ bool NavEKF3_core::setup_core(uint8_t _imu_index, uint8_t _core_index)
 {
     imu_index = _imu_index;
     gyro_index_active = imu_index;
+    gyro_physical_active = imu_index;
     accel_index_active = imu_index;
     core_index = _core_index;
 

@@ -416,13 +416,17 @@ void NavEKF3_core::readIMUData(bool startPredictEnabled)
         gyro_active = ins.get_first_usable_gyro();
     }
 
-    if (gyro_active != gyro_index_active) {
+    // the averaged IMU instance carries the samples of one physical gyro,
+    // whose bias is the one to use and to keep learning
+    const uint8_t gyro_physical = ins.get_physical_gyro(gyro_active);
+    if (gyro_active != gyro_index_active || gyro_physical != gyro_physical_active) {
         // we are switching active gyro at runtime. Copy over the
         // bias we have learned from the previously inactive
         // gyro. We don't re-init the bias uncertainty as it should
         // have the same uncertainty as the previously active gyro
-        stateStruct.gyro_bias = inactiveBias[gyro_active].gyro_bias;
+        stateStruct.gyro_bias = inactiveBias[gyro_physical].gyro_bias;
         gyro_index_active = gyro_active;
+        gyro_physical_active = gyro_physical;
     }
 
     if (accel_active != accel_index_active) {
@@ -1324,7 +1328,7 @@ void NavEKF3_core::learnInactiveBiases(void)
             // can't use this gyro
             continue;
         }
-        if (gyro_index_active == i) {
+        if (gyro_index_active == i || gyro_physical_active == i) {
             // use current estimates from main filter of gyro bias
             inactiveBias[i].gyro_bias = stateStruct.gyro_bias;
         } else {
