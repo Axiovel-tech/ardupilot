@@ -1226,6 +1226,8 @@ private:
         DONE,
     } tkoAbiasState;
     ftype tkoAbiasRefPosD;          // vertical position while waiting for first thrust (m)
+    uint32_t tkoAbiasPosResetD_ms;  // lastPosResetD_ms accounted for in tkoAbiasRefPosD
+    bool tkoAbiasAveraged;          // lane on averaged accels at first thrust
     bool posVelFusionDelayed;       // true when the position and velocity fusion has been delayed
 #if EK3_FEATURE_OPTFLOW_FUSION
     bool optFlowFusionDelayed;      // true when the optical flow fusion has been delayed

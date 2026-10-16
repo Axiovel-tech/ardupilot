@@ -302,6 +302,8 @@ void NavEKF3_core::InitialiseVariables()
     prevMotorsArmed = false;
     tkoAbiasState = TkoAbiasState::WAIT_THRUST;
     tkoAbiasRefPosD = 0;
+    tkoAbiasPosResetD_ms = 0;
+    tkoAbiasAveraged = false;
     memset(&gpsCheckStatus, 0, sizeof(gpsCheckStatus));
     gpsSpdAccPass = false;
     ekfInnovationsPass = false;
@@ -1831,14 +1833,21 @@ void NavEKF3_core::updateTakeoffAccelBiasVariance()
     switch (tkoAbiasState) {
     case TkoAbiasState::WAIT_THRUST:
         tkoAbiasRefPosD = stateStruct.position.z;
+        tkoAbiasPosResetD_ms = lastPosResetD_ms;
         if (!thrusting) {
             return;
         }
+        // decided once, so a single late accel sample cannot change the trigger
+        tkoAbiasAveraged = dal.ins().get_accel_averaged(imu_index);
         tkoAbiasState = TkoAbiasState::WAIT_LIFTOFF;
         FALLTHROUGH;
 
     case TkoAbiasState::WAIT_LIFTOFF: {
-        const bool averaged = dal.ins().get_accel_averaged(accel_index_active);
+        if (lastPosResetD_ms != tkoAbiasPosResetD_ms) {
+            tkoAbiasRefPosD += posResetD;
+            tkoAbiasPosResetD_ms = lastPosResetD_ms;
+        }
+        const bool averaged = tkoAbiasAveraged;
         const bool lifted = stateStruct.position.z < tkoAbiasRefPosD - TKO_ABIAS_LIFTOFF_HGT;
         if ((averaged && !lifted) ||
             inhibitDelVelBiasStates || dvelBiasAxisInhibit[2]) {
