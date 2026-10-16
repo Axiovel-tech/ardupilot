@@ -155,6 +155,8 @@ define ALLOW_ARM_NO_COMPASS
 # IMU setup - Dual ICM42688P
 IMU Invensensev3 SPI:icm42688_1 ROTATION_NONE
 IMU Invensensev3 SPI:icm42688_2 ROTATION_ROLL_180_YAW_270
+# third instance slot for the averaged IMU (INS_ACC_AVG)
+define INS_MAX_INSTANCES 3
 
 # DMA configuration
 DMA_NOSHARE SPI4* SPI2* TIM3* TIM1_UP TIM5_UP UART4_TX UART8_TX
