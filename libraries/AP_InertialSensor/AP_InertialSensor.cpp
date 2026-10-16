@@ -91,6 +91,9 @@ extern const AP_HAL::HAL& hal;
 
 #define GYRO_INIT_MAX_DIFF_DPS 0.1f
 
+// time constant of the held accelerometer difference used when one accelerometer is lost
+#define VIRTUAL_IMU_HALF_DIFF_TC_S 1.0f
+
 #ifndef HAL_INS_TRIM_LIMIT_DEG
 #define HAL_INS_TRIM_LIMIT_DEG 10
 #endif
@@ -699,6 +702,16 @@ const AP_Param::GroupInfo AP_InertialSensor::var_info[] = {
 
     // indexes 57 and 58 used by INS_HNTC3 and INS_HNTC4
 
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+    // @Param: _ACC_AVG
+    // @DisplayName: Averaged accelerometer IMU
+    // @Description: On a board with exactly two IMUs, add a third IMU instance whose accelerometer is the mean of the two accelerometers and whose gyro is one of the two gyros unchanged. If an accelerometer fails, the instance continues on the other one, corrected by the last averaged difference. Select the instance with EK3_IMU_MASK and EK3_PRIMARY.
+    // @Values: 0:Disabled,1:Enabled
+    // @RebootRequired: True
+    // @User: Advanced
+    AP_GROUPINFO("_ACC_AVG", 60, AP_InertialSensor, _virtual_imu_enable, 0),
+#endif
+
     /*
       NOTE: parameter indexes have gaps above. When adding new
       parameters check for conflicts carefully
@@ -873,6 +886,10 @@ void AP_InertialSensor::_start_backends()
     if (_gyro_count == 0 || _accel_count == 0) {
         AP_HAL::panic("INS needs at least 1 gyro and 1 accel");
     }
+#endif
+
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+    start_virtual_imu();
 #endif
 
     // clear IDs for unused sensor instances
@@ -1085,7 +1102,7 @@ AP_InertialSensor::init(uint16_t loop_rate)
     }
 
     // allocate notches
-    for (uint8_t i=0; i<get_gyro_count(); i++) {
+    for (uint8_t i=0; i<_gyro_count; i++) {
         // only allocate notches for IMUs in use
         if (_use(i)) {
             for (auto &notch : harmonic_notches) {
@@ -1436,7 +1453,7 @@ bool AP_InertialSensor::get_gyro_health_all(void) const
 bool AP_InertialSensor::gyros_consistent(uint8_t threshold) const
 {
      
-    const uint8_t gyro_count = get_gyro_count();
+    const uint8_t gyro_count = _gyro_count;
     if (gyro_count <= 1) {
         return true;
     }
@@ -1481,7 +1498,7 @@ bool AP_InertialSensor::gyro_calibrated_ok_all() const
 bool AP_InertialSensor::pre_arm_check_gyro_backend_rate_hz(char* fail_msg, uint16_t fail_msg_len) const
 {
 #if AP_SCHEDULER_ENABLED
-    const auto gyro_count = get_gyro_count();
+    const auto gyro_count = _gyro_count;
     const auto threshold = 1.8 * _loop_rate;
     for (uint8_t i=0; i<gyro_count; i++) {
         if (!_use(i) || _backends[i] == nullptr) {
@@ -1523,7 +1540,7 @@ bool AP_InertialSensor::get_accel_health_all(void) const
 // accel_error_threshold in m/s/s to be consistent
 bool AP_InertialSensor::accels_consistent(float accel_error_threshold) const
 {
-    const uint8_t accel_count = get_accel_count();
+    const uint8_t accel_count = _accel_count;
     if (accel_count <= 1) {
         return true;
     }
@@ -1638,7 +1655,7 @@ failed:
 bool AP_InertialSensor::accel_calibrated_ok_all() const
 {
     // check each accelerometer has offsets saved
-    for (uint8_t i=0; i<get_accel_count(); i++) {
+    for (uint8_t i=0; i<_accel_count; i++) {
         if (!_accel_id_ok[i]) {
             return false;
         }
@@ -1687,7 +1704,7 @@ bool AP_InertialSensor::use_accel(uint8_t instance) const
 void
 AP_InertialSensor::_init_gyro()
 {
-    uint8_t num_gyros = MIN(get_gyro_count(), INS_MAX_INSTANCES);
+    uint8_t num_gyros = MIN(_gyro_count, INS_MAX_INSTANCES);
     Vector3f last_average[INS_MAX_INSTANCES], best_avg[INS_MAX_INSTANCES];
     Vector3f new_gyro_offset[INS_MAX_INSTANCES];
     float best_diff[INS_MAX_INSTANCES];
@@ -1853,6 +1870,9 @@ void AP_InertialSensor::_save_gyro_calibration()
 #endif
     }
     for (uint8_t i=_gyro_count; i<INS_MAX_INSTANCES; i++) {
+        if (is_virtual_imu(i)) {
+            continue;
+        }
         _gyro_offset(i).set_and_save(Vector3f());
         _gyro_id(i).set_and_save(0);
 #if HAL_INS_TEMPERATURE_CAL_ENABLE
@@ -1892,6 +1912,115 @@ void AP_InertialSensor::set_primary(uint8_t instance)
 {
     _primary = instance;
 }
+
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+/*
+  register the averaged instance after the physical IMUs
+ */
+void AP_InertialSensor::start_virtual_imu()
+{
+    if (_virtual_imu_enable == 0) {
+        return;
+    }
+    if (_gyro_count != VIRTUAL_IMU_INSTANCE || _accel_count != VIRTUAL_IMU_INSTANCE) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "INS_ACC_AVG needs exactly 2 IMUs, disabled");
+        return;
+    }
+    const uint32_t id = AP_HAL::Device::make_bus_id(AP_HAL::Device::BUS_TYPE_UNKNOWN, 0, 0,
+                                                    AP_InertialSensor_Backend::DEVTYPE_INS_AVERAGE);
+    _accel_id(VIRTUAL_IMU_INSTANCE).set(id);
+    _gyro_id(VIRTUAL_IMU_INSTANCE).set(id);
+    _virtual_imu.active = true;
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "IMU%u: average of IMU1 and IMU2 accels", VIRTUAL_IMU_INSTANCE+1);
+}
+
+/*
+  build the averaged instance from what the physical IMUs published in this update
+ */
+void AP_InertialSensor::update_virtual_imu()
+{
+    if (!_virtual_imu.active) {
+        return;
+    }
+    auto &v = _virtual_imu;
+    const uint8_t vi = VIRTUAL_IMU_INSTANCE;
+
+    // gyro: one physical gyro passed through. Stay on it until it is
+    // unusable; switching back after a missed update would pass on a
+    // delta angle overlapping the one already taken from the other gyro
+    if (!use_gyro(v.gyro_source) && use_gyro(1 - v.gyro_source)) {
+        v.gyro_source = 1 - v.gyro_source;
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "IMU%u: gyro now from IMU%u", vi+1, v.gyro_source+1);
+    }
+    const uint8_t g = v.gyro_source;
+    if (use_gyro(g)) {
+        _gyro[vi] = _gyro[g];
+        _delta_angle[vi] = _delta_angle[g];
+        _delta_angle_dt[vi] = _delta_angle_dt[g];
+        _delta_angle_valid[vi] = _delta_angle_valid[g];
+        _gyro_raw_sample_rates[vi] = _gyro_raw_sample_rates[g];
+        _gyro_over_sampling[vi] = _gyro_over_sampling[g];
+        _gyro_healthy[vi] = true;
+    }
+
+    // accel: mean of the two, or the survivor corrected by the held half difference
+    uint8_t mask = 0;
+    for (uint8_t i=0; i<vi; i++) {
+        if (use_accel(i) && _delta_velocity_valid[i] && is_positive(_delta_velocity_dt[i])) {
+            mask |= 1U<<i;
+        }
+    }
+    if (mask == 0b11) {
+        const Vector3f rate0 = _delta_velocity[0] / _delta_velocity_dt[0];
+        const Vector3f rate1 = _delta_velocity[1] / _delta_velocity_dt[1];
+        // an accel missing from the last update carries that period in
+        // its delta velocity, but the other accel already covered it alone
+        float dt;
+        switch (v.accel_mask) {
+        case 0b01:
+            dt = _delta_velocity_dt[0];
+            break;
+        case 0b10:
+            dt = _delta_velocity_dt[1];
+            break;
+        default:
+            dt = 0.5f * (_delta_velocity_dt[0] + _delta_velocity_dt[1]);
+            break;
+        }
+        _delta_velocity[vi] = (rate0 + rate1) * (0.5f * dt);
+        _delta_velocity_dt[vi] = dt;
+        _accel[vi] = (_accel[0] + _accel[1]) * 0.5f;
+        const Vector3f half_diff = (rate0 - rate1) * 0.5f;
+        if (v.half_diff_valid) {
+            v.half_diff += (half_diff - v.half_diff) * (dt / (dt + VIRTUAL_IMU_HALF_DIFF_TC_S));
+        } else {
+            v.half_diff = half_diff;
+            v.half_diff_valid = true;
+        }
+        v.pos = (_accel_pos(0).get() + _accel_pos(1).get()) * 0.5f;
+        _temperature[vi] = 0.5f * (_temperature[0] + _temperature[1]);
+    } else if (mask != 0) {
+        const uint8_t a = (mask == 0b01) ? 0 : 1;
+        const Vector3f correction = (a == 0) ? -v.half_diff : v.half_diff;
+        _delta_velocity[vi] = _delta_velocity[a] + correction * _delta_velocity_dt[a];
+        _delta_velocity_dt[vi] = _delta_velocity_dt[a];
+        _accel[vi] = _accel[a] + correction;
+        v.pos = _accel_pos(a).get();
+        _temperature[vi] = _temperature[a];
+    }
+    if (mask != 0) {
+        const uint8_t a = (mask & 0b01) ? 0 : 1;
+        _accel_raw_sample_rates[vi] = _accel_raw_sample_rates[a];
+        _accel_over_sampling[vi] = _accel_over_sampling[a];
+        _delta_velocity_valid[vi] = true;
+        _accel_healthy[vi] = true;
+    }
+    if (mask != 0b11) {
+        v.degraded_count++;
+    }
+    v.accel_mask = mask;
+}
+#endif  // AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
 
 /*
   update gyro and accel values from backends
@@ -1960,6 +2089,10 @@ void AP_InertialSensor::update(void)
                 _accel_healthy[i] = false;
             }
         }
+
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+        update_virtual_imu();
+#endif
 
         // set primary to first healthy accel and gyro
         for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
@@ -2298,6 +2431,9 @@ bool AP_InertialSensor::temperature_cal_running() const
 {
 #if HAL_INS_TEMPERATURE_CAL_ENABLE
     for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
+        if (is_virtual_imu(i)) {
+            continue;
+        }
         if (tcal(i).enable == AP_InertialSensor_TCal::Enable::LearnCalibration) {
             return true;
         }
@@ -2408,6 +2544,9 @@ void AP_InertialSensor::_acal_save_calibrations()
 
     // clear any unused accels
     for (uint8_t i=_accel_count; i<INS_MAX_INSTANCES; i++) {
+        if (is_virtual_imu(i)) {
+            continue;
+        }
         _accel_id(i).set_and_save(0);
         _accel_offset(i).set_and_save(Vector3f());
         _accel_scale(i).set_and_save(Vector3f());
@@ -2542,7 +2681,7 @@ MAV_RESULT AP_InertialSensor::simple_accel_cal()
     }
     last_accel_cal_ms = now;
 
-    uint8_t num_accels = MIN(get_accel_count(), INS_MAX_INSTANCES);
+    uint8_t num_accels = MIN(_accel_count, INS_MAX_INSTANCES);
     Vector3f last_average[INS_MAX_INSTANCES];
     Vector3f new_accel_offset[INS_MAX_INSTANCES];
     Vector3f saved_offsets[INS_MAX_INSTANCES];
@@ -2669,6 +2808,9 @@ MAV_RESULT AP_InertialSensor::simple_accel_cal()
 #endif
         }
         for (uint8_t k=num_accels; k<INS_MAX_INSTANCES; k++) {
+            if (is_virtual_imu(k)) {
+                continue;
+            }
             _accel_offset(k).set_and_save(Vector3f());
             _accel_scale(k).set_and_save(Vector3f());
             _gyro_offset(k).set_and_save(Vector3f());

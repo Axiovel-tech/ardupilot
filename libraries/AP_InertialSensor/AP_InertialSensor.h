@@ -134,21 +134,21 @@ public:
     const Vector3f     &get_accel(void) const { return get_accel(_first_usable_accel); }
 
     // multi-device interface
-    bool get_gyro_health(uint8_t instance) const { return (instance<_gyro_count) ? _gyro_healthy[instance] : false; }
+    bool get_gyro_health(uint8_t instance) const { return (instance<get_gyro_count()) ? _gyro_healthy[instance] : false; }
     bool get_gyro_health(void) const { return get_gyro_health(_first_usable_gyro); }
     bool get_gyro_health_all(void) const;
     bool gyros_consistent(uint8_t threshold) const;
-    uint8_t get_gyro_count(void) const { return MIN(INS_MAX_INSTANCES, _gyro_count); }
+    uint8_t get_gyro_count(void) const { return MIN(INS_MAX_INSTANCES, _gyro_count + virtual_imu_count()); }
     bool gyro_calibrated_ok(uint8_t instance) const { return _gyro_cal_ok[instance]; }
     bool gyro_calibrated_ok_all() const;
     bool use_gyro(uint8_t instance) const;
     Gyro_Calibration_Timing gyro_calibration_timing();
 
-    bool get_accel_health(uint8_t instance) const { return (instance<_accel_count) ? _accel_healthy[instance] : false; }
+    bool get_accel_health(uint8_t instance) const { return (instance<get_accel_count()) ? _accel_healthy[instance] : false; }
     bool get_accel_health(void) const { return get_accel_health(_first_usable_accel); }
     bool get_accel_health_all(void) const;
     bool accels_consistent(float accel_error_threshold) const;
-    uint8_t get_accel_count(void) const { return MIN(INS_MAX_INSTANCES, _accel_count); }
+    uint8_t get_accel_count(void) const { return MIN(INS_MAX_INSTANCES, _accel_count + virtual_imu_count()); }
     bool accel_calibrated_ok_all() const;
     bool use_accel(uint8_t instance) const;
 
@@ -161,9 +161,9 @@ public:
 
     // FFT support access
 #if HAL_GYROFFT_ENABLED
-    const Vector3f& get_gyro_for_fft(void) const { return _gyro_for_fft[_primary]; }
+    const Vector3f& get_gyro_for_fft(void) const { return _gyro_for_fft[physical_gyro(_primary)]; }
     FloatBuffer&  get_raw_gyro_window(uint8_t instance, uint8_t axis) { return _gyro_window[instance][axis]; }
-    FloatBuffer&  get_raw_gyro_window(uint8_t axis) { return get_raw_gyro_window(_primary, axis); }
+    FloatBuffer&  get_raw_gyro_window(uint8_t axis) { return get_raw_gyro_window(physical_gyro(_primary), axis); }
 #if AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
     bool has_fft_notch() const;
 #endif
@@ -181,6 +181,11 @@ public:
 
     // return a 3D vector defining the position offset of the IMU accelerometer in metres relative to the body frame origin
     const Vector3f &get_imu_pos_offset(uint8_t instance) const {
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+        if (is_virtual_imu(instance)) {
+            return _virtual_imu.pos;
+        }
+#endif
         return _accel_pos(instance);
     }
     const Vector3f &get_imu_pos_offset(void) const {
@@ -482,6 +487,34 @@ public:
 #endif  // AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
 
 private:
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+    // the virtual instance follows the two physical IMUs it is built from
+    static constexpr uint8_t VIRTUAL_IMU_INSTANCE = 2;
+    uint8_t virtual_imu_count() const { return _virtual_imu.active ? 1 : 0; }
+    bool is_virtual_imu(uint8_t instance) const { return _virtual_imu.active && instance == VIRTUAL_IMU_INSTANCE; }
+    // physical gyro whose samples feed an instance; consumers of raw gyro samples (rate thread, notch, FFT) need it
+    uint8_t physical_gyro(uint8_t instance) const { return is_virtual_imu(instance) ? _virtual_imu.gyro_source : instance; }
+    void start_virtual_imu();
+    void update_virtual_imu();
+
+    AP_Int8 _virtual_imu_enable;
+    struct {
+        bool active;
+        uint8_t gyro_source;
+        // physical accels used in the last update()
+        uint8_t accel_mask;
+        bool half_diff_valid;
+        // low-passed (accel0 - accel1)/2
+        Vector3f half_diff;
+        Vector3f pos;
+        uint32_t degraded_count;
+    } _virtual_imu;
+#else
+    uint8_t virtual_imu_count() const { return 0; }
+    bool is_virtual_imu(uint8_t instance) const { return false; }
+    uint8_t physical_gyro(uint8_t instance) const { return instance; }
+#endif
+
     // load backend drivers
     bool _add_backend(AP_InertialSensor_Backend *backend);
     void _start_backends();
@@ -735,7 +768,7 @@ private:
     void _acal_event_failure() override;
 
     // Returns AccelCalibrator objects pointer for specified acceleromter
-    AccelCalibrator* _acal_get_calibrator(uint8_t i) override { return i<get_accel_count()?&(_accel_calibrator[i]):nullptr; }
+    AccelCalibrator* _acal_get_calibrator(uint8_t i) override { return i<_accel_count?&(_accel_calibrator[i]):nullptr; }
 
     Vector3f _trim_rad;
     bool _new_trim;
