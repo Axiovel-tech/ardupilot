@@ -37,7 +37,9 @@ void AP_DAL_InertialSensor::start_frame()
 
         // gryo data
         RISI.use_gyro = ins.use_gyro(i);
-        RISI.physical_gyro = ins.get_physical_gyro(i);
+        // 0 for the instance's own gyro, which is what older logs hold
+        const uint8_t physical_gyro = ins.get_physical_gyro(i);
+        RISI.physical_gyro = (physical_gyro == i) ? 0 : physical_gyro + 1;
         if (RISI.use_gyro) {
             RISI.get_delta_angle_ret = ins.get_delta_angle(i, RISI.delta_angle, RISI.delta_angle_dt);
         }

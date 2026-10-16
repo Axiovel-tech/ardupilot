@@ -33,7 +33,10 @@ public:
     uint8_t get_first_usable_gyro(void) const { return _RISH.first_usable_gyro; };
 
     bool use_gyro(uint8_t instance) const { return _RISI[instance].use_gyro; }
-    uint8_t get_physical_gyro(uint8_t instance) const { return _RISI[instance].physical_gyro; }
+    uint8_t get_physical_gyro(uint8_t instance) const {
+        const uint8_t g = _RISI[instance].physical_gyro;
+        return g == 0 ? instance : g - 1;
+    }
     const Vector3f     &get_gyro(uint8_t i) const { return gyro_filtered[i]; }
     const Vector3f     &get_gyro() const { return get_gyro(_primary_gyro); }
     bool get_delta_angle(uint8_t i, Vector3f &delta_angle, float &delta_angle_dt) const {

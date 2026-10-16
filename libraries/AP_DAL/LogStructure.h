@@ -125,7 +125,7 @@ struct log_RISH {
 // @Field: DAZ: z-axis delta-angle
 // @Field: DVDT: delta-velocity-delta-time
 // @Field: DADT: delta-angle-delta-time
-// @Field: Flags: use-accel, use-gyro, delta-vel-valid, delta-accel-valid, physical gyro (3 bits)
+// @Field: Flags: use-accel, use-gyro, delta-vel-valid, delta-accel-valid, physical gyro + 1 or 0 for own (3 bits)
 // @Field: I: IMU instance
 struct log_RISI {
     Vector3f delta_velocity;
