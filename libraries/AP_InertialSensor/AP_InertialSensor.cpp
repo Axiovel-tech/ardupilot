@@ -1081,7 +1081,7 @@ AP_InertialSensor::init(uint16_t loop_rate)
 
     // count number of used sensors
     uint8_t sensors_used = 0;
-    for (uint8_t i = 0; i < INS_MAX_INSTANCES; i++) {
+    for (uint8_t i = 0; i < _gyro_count; i++) {
         sensors_used += _use(i);
     }
 
