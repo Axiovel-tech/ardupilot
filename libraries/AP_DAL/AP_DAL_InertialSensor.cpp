@@ -31,6 +31,7 @@ void AP_DAL_InertialSensor::start_frame()
 
         // accel data
         RISI.use_accel = ins.use_accel(i);
+        RISI.accel_averaged = ins.accel_averaged(i);
         if (RISI.use_accel) {
             RISI.get_delta_velocity_ret = ins.get_delta_velocity(i, RISI.delta_velocity, RISI.delta_velocity_dt);
         }

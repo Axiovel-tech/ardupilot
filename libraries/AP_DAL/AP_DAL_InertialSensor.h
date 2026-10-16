@@ -21,6 +21,7 @@ public:
     uint8_t get_first_usable_accel(void) const { return _RISH.first_usable_accel; };
 
     bool use_accel(uint8_t instance) const { return _RISI[instance].use_accel; }
+    bool get_accel_averaged(uint8_t instance) const { return _RISI[instance].accel_averaged; }
     const Vector3f     &get_accel(uint8_t i) const { return accel_filtered[i]; }
     bool get_delta_velocity(uint8_t i, Vector3f &delta_velocity, float &delta_velocity_dt) const {
         delta_velocity = _RISI[i].delta_velocity;

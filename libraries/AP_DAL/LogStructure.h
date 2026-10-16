@@ -87,7 +87,7 @@ struct log_RFRN {
     uint8_t vehicle_class;
     uint8_t ekf_type;
     uint8_t armed:1;
-    uint8_t unused:1;  // was get_compass_is_null
+    uint8_t motors_thrusting:1;  // was get_compass_is_null
     uint8_t fly_forward:1;
     uint8_t ahrs_airspeed_sensor_enabled:1;
     uint8_t opticalflow_enabled:1;
@@ -125,7 +125,7 @@ struct log_RISH {
 // @Field: DAZ: z-axis delta-angle
 // @Field: DVDT: delta-velocity-delta-time
 // @Field: DADT: delta-angle-delta-time
-// @Field: Flags: use-accel, use-gyro, delta-vel-valid, delta-accel-valid, physical gyro + 1 or 0 for own (3 bits)
+// @Field: Flags: use-accel, use-gyro, delta-vel-valid, delta-accel-valid, physical gyro + 1 or 0 for own (3 bits), accel-averaged
 // @Field: I: IMU instance
 struct log_RISI {
     Vector3f delta_velocity;
@@ -137,6 +137,7 @@ struct log_RISI {
     uint8_t get_delta_velocity_ret:1;
     uint8_t get_delta_angle_ret:1;
     uint8_t physical_gyro:3;
+    uint8_t accel_averaged:1;
     uint8_t instance;
     uint8_t _end;
 };
