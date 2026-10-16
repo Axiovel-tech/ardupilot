@@ -496,6 +496,7 @@ private:
     uint8_t physical_gyro(uint8_t instance) const { return is_virtual_imu(instance) ? _virtual_imu.gyro_source : instance; }
     void start_virtual_imu();
     void update_virtual_imu();
+    void Write_IAVG() const;
 
     AP_Int8 _virtual_imu_enable;
     struct {

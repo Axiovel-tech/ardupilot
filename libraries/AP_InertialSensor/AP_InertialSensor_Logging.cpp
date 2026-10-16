@@ -82,7 +82,7 @@ void AP_InertialSensor::Write_Vibration() const
 {
     const uint64_t time_us = AP_HAL::micros64();
     for (uint8_t i = 0; i < INS_MAX_INSTANCES; i++) {
-        if (!use_accel(i)) {
+        if (!use_accel(i) || is_virtual_imu(i)) {
             continue;
         }
 
@@ -98,7 +98,37 @@ void AP_InertialSensor::Write_Vibration() const
         };
         AP::logger().WriteBlock(&pkt, sizeof(pkt));
     }
+
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+    if (_virtual_imu.active) {
+        Write_IAVG();
+    }
+#endif
 }
+
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+// @LoggerMessage: IAVG
+// @Description: Averaged accelerometer IMU instance
+// @Field: TimeUS: Time since system startup
+// @Field: AMsk: physical accelerometers used in the last update
+// @Field: GSrc: physical gyro passed through
+// @Field: NDeg: updates since boot that did not average both accelerometers
+// @Field: HX: held half difference of the two accelerometers, X axis
+// @Field: HY: held half difference of the two accelerometers, Y axis
+// @Field: HZ: held half difference of the two accelerometers, Z axis
+void AP_InertialSensor::Write_IAVG() const
+{
+    const auto &v = _virtual_imu;
+    AP::logger().WriteStreaming("IAVG", "TimeUS,AMsk,GSrc,NDeg,HX,HY,HZ", "s---ooo", "F---000", "QBBIfff",
+                                AP_HAL::micros64(),
+                                v.accel_mask,
+                                v.gyro_source,
+                                v.degraded_count,
+                                v.half_diff.x,
+                                v.half_diff.y,
+                                v.half_diff.z);
+}
+#endif
 
 #if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
 // Write information about a series of IMU readings to log:
