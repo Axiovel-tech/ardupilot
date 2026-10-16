@@ -448,7 +448,9 @@ void NavEKF3_core::readIMUData(bool startPredictEnabled)
     // Get delta angle data from primary gyro or primary if not available
     readDeltaAngle(gyro_index_active, imuDataNew.delAng, imuDataNew.delAngDT);
     imuDataNew.delAngDT = MAX(imuDataNew.delAngDT, 1.0e-4f);
-    imuDataNew.gyro_index = gyro_index_active;
+    // the physical gyro, so buffered samples keep their own gyro's bias
+    // when the averaged instance changes gyro
+    imuDataNew.gyro_index = gyro_physical_active;
 
     // Get current time stamp
     imuDataNew.time_ms = imuSampleTime_ms;

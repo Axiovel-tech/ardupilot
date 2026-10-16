@@ -334,7 +334,7 @@ void NavEKF3_core::InitialiseVariables()
     imuDataDownSampledNew.delVel.zero();
     imuDataDownSampledNew.delAngDT = 0.0f;
     imuDataDownSampledNew.delVelDT = 0.0f;
-    imuDataDownSampledNew.gyro_index = gyro_index_active;
+    imuDataDownSampledNew.gyro_index = gyro_physical_active;
     imuDataDownSampledNew.accel_index = accel_index_active;
     runUpdates = false;
     framesSincePredict = 0;
