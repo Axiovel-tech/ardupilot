@@ -181,11 +181,6 @@ public:
 
     // return a 3D vector defining the position offset of the IMU accelerometer in metres relative to the body frame origin
     const Vector3f &get_imu_pos_offset(uint8_t instance) const {
-#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
-        if (is_virtual_imu(instance)) {
-            return _virtual_imu.pos;
-        }
-#endif
         return _accel_pos(instance);
     }
     const Vector3f &get_imu_pos_offset(void) const {
@@ -510,7 +505,6 @@ private:
         bool half_diff_valid;
         // low-passed (accel0 - accel1)/2
         Vector3f half_diff;
-        Vector3f pos;
         uint32_t degraded_count;
     } _virtual_imu;
 #else

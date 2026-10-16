@@ -1932,6 +1932,10 @@ void AP_InertialSensor::start_virtual_imu()
                                                     AP_InertialSensor_Backend::DEVTYPE_INS_AVERAGE);
     _accel_id(VIRTUAL_IMU_INSTANCE).set(id);
     _gyro_id(VIRTUAL_IMU_INSTANCE).set(id);
+    // midpoint, exact for a rigid body; kept while degraded too, the error
+    // being the lever arm of half the IMU separation. Set in RAM so the
+    // logged INS_POS3 lets Replay use the same offset
+    _accel_pos(VIRTUAL_IMU_INSTANCE).set((_accel_pos(0).get() + _accel_pos(1).get()) * 0.5f);
     _virtual_imu.active = true;
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "IMU%u: average of IMU1 and IMU2 accels", VIRTUAL_IMU_INSTANCE+1);
 }
@@ -2013,7 +2017,6 @@ void AP_InertialSensor::update_virtual_imu()
                 v.half_diff_valid = true;
             }
         }
-        v.pos = (_accel_pos(0).get() + _accel_pos(1).get()) * 0.5f;
         _temperature[vi] = 0.5f * (_temperature[0] + _temperature[1]);
     } else if (mask != 0) {
         const uint8_t a = (mask == 0b01) ? 0 : 1;
@@ -2022,7 +2025,6 @@ void AP_InertialSensor::update_virtual_imu()
         _delta_velocity[vi] = (_delta_velocity[a] / _delta_velocity_dt[a] + correction) * dt;
         _delta_velocity_dt[vi] = dt;
         _accel[vi] = _accel[a] + correction;
-        v.pos = _accel_pos(a).get();
         _temperature[vi] = _temperature[a];
     }
     if (mask != 0) {
