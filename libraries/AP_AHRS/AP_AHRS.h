@@ -691,6 +691,15 @@ public:
         return touchdown_expected;
     }
 
+    // set by the vehicle while its motors produce more than idle thrust
+    void set_motors_thrusting(bool b) {
+        motors_thrusting = b;
+    }
+
+    bool get_motors_thrusting(void) const {
+        return motors_thrusting;
+    }
+
     /*
      * fly_forward is set by the vehicles to indicate the vehicle
      * should generally be moving in the direction of its heading.
@@ -886,6 +895,7 @@ private:
     uint32_t takeoff_expected_start_ms;
     bool touchdown_expected;    // true if the vehicle is in a state that touchdown might be expected.  Ground effect may be in play.
     uint32_t touchdown_expected_start_ms;
+    bool motors_thrusting;
 
     /*
      * wind estimation support
