@@ -151,6 +151,14 @@ public:
     uint8_t get_accel_count(void) const { return MIN(INS_MAX_INSTANCES, _accel_count + virtual_imu_count()); }
     bool accel_calibrated_ok_all() const;
     bool use_accel(uint8_t instance) const;
+    // true if the instance is the averaged one and it averaged both accels in the last update
+    bool accel_averaged(uint8_t instance) const {
+#if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
+        return is_virtual_imu(instance) && _virtual_imu.accel_mask == 0b11;
+#else
+        return false;
+#endif
+    }
 
     // physical gyro whose samples an instance carries
     uint8_t get_physical_gyro(uint8_t instance) const { return physical_gyro(instance); }
