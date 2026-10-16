@@ -707,7 +707,7 @@ const AP_Param::GroupInfo AP_InertialSensor::var_info[] = {
 #if AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
     // @Param: _ACC_AVG
     // @DisplayName: Averaged accelerometer IMU
-    // @Description: On a board with exactly two IMUs, add a third IMU instance whose accelerometer is the mean of the two accelerometers and whose gyro is one of the two gyros unchanged. If an accelerometer fails, the instance continues on the other one, corrected by the last averaged difference. Select the instance with EK3_IMU_MASK and EK3_PRIMARY.
+    // @Description: On a board with exactly two IMUs, add a third IMU instance whose accelerometer is the mean of the two accelerometers and whose gyro is one of the two gyros unchanged. If an accelerometer fails, the instance continues on the other one, corrected by the last averaged difference. Select the instance with EK3_IMU_MASK and EK3_PRIMARY, e.g. EK3_IMU_MASK 6 and EK3_PRIMARY 1, so that the other EKF lane runs on IMU2 alone while the averaged instance uses the IMU1 gyro.
     // @Values: 0:Disabled,1:Enabled
     // @RebootRequired: True
     // @User: Advanced
