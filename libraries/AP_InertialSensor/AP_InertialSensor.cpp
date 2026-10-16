@@ -1986,8 +1986,8 @@ void AP_InertialSensor::update_virtual_imu()
         _delta_angle[vi] = _delta_angle[g];
         _delta_angle_dt[vi] = _delta_angle_dt[g];
         if (gyro_returning & (1U<<g)) {
-            _delta_angle[vi] *= _loop_delta_t / _delta_angle_dt[g];
-            _delta_angle_dt[vi] = _loop_delta_t;
+            _delta_angle[vi] *= get_delta_time() / _delta_angle_dt[g];
+            _delta_angle_dt[vi] = get_delta_time();
         }
         _delta_angle_valid[vi] = true;
         _gyro_raw_sample_rates[vi] = _gyro_raw_sample_rates[g];
@@ -2004,7 +2004,7 @@ void AP_InertialSensor::update_virtual_imu()
     if (mask == 0b11) {
         const Vector3f rate0 = _delta_velocity[0] / _delta_velocity_dt[0];
         const Vector3f rate1 = _delta_velocity[1] / _delta_velocity_dt[1];
-        const float dt = backlog ? _loop_delta_t : 0.5f * (_delta_velocity_dt[0] + _delta_velocity_dt[1]);
+        const float dt = backlog ? get_delta_time() : 0.5f * (_delta_velocity_dt[0] + _delta_velocity_dt[1]);
         _delta_velocity[vi] = (rate0 + rate1) * (0.5f * dt);
         _delta_velocity_dt[vi] = dt;
         _accel[vi] = (_accel[0] + _accel[1]) * 0.5f;
@@ -2021,7 +2021,7 @@ void AP_InertialSensor::update_virtual_imu()
     } else if (mask != 0) {
         const uint8_t a = (mask == 0b01) ? 0 : 1;
         const Vector3f correction = (a == 0) ? -v.half_diff : v.half_diff;
-        const float dt = backlog ? _loop_delta_t : _delta_velocity_dt[a];
+        const float dt = backlog ? get_delta_time() : _delta_velocity_dt[a];
         _delta_velocity[vi] = (_delta_velocity[a] / _delta_velocity_dt[a] + correction) * dt;
         _delta_velocity_dt[vi] = dt;
         _accel[vi] = _accel[a] + correction;
