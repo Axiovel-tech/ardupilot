@@ -93,6 +93,8 @@ extern const AP_HAL::HAL& hal;
 
 // time constant of the held accelerometer difference used when one accelerometer is lost
 #define VIRTUAL_IMU_HALF_DIFF_TC_S 1.0f
+// time the pass-through gyro must be unusable before switching to the other gyro
+#define VIRTUAL_IMU_GYRO_SWITCH_MS 100
 
 #ifndef HAL_INS_TRIM_LIMIT_DEG
 #define HAL_INS_TRIM_LIMIT_DEG 10
@@ -1944,66 +1946,81 @@ void AP_InertialSensor::update_virtual_imu()
     }
     auto &v = _virtual_imu;
     const uint8_t vi = VIRTUAL_IMU_INSTANCE;
+    const uint32_t now_ms = AP_HAL::millis();
 
-    // gyro: one physical gyro passed through. Stay on it until it is
-    // unusable; switching back after a missed update would pass on a
-    // delta angle overlapping the one already taken from the other gyro
-    if (!use_gyro(v.gyro_source) && use_gyro(1 - v.gyro_source)) {
-        v.gyro_source = 1 - v.gyro_source;
+    // a sensor missing from the last update carries the missed period in
+    // its delta; that period was already covered without it, so it must
+    // not be passed on again
+    uint8_t gyro_present = 0;
+    uint8_t accel_present = 0;
+    for (uint8_t i=0; i<vi; i++) {
+        if (use_gyro(i) && _delta_angle_valid[i] && is_positive(_delta_angle_dt[i])) {
+            gyro_present |= 1U<<i;
+        }
+        if (use_accel(i) && _delta_velocity_valid[i] && is_positive(_delta_velocity_dt[i])) {
+            accel_present |= 1U<<i;
+        }
+    }
+    const uint8_t gyro_returning = gyro_present & ~v.gyro_present_last;
+    const uint8_t accel_returning = accel_present & ~v.accel_present_last;
+    v.gyro_present_last = gyro_present;
+    v.accel_present_last = accel_present;
+
+    // gyro: one physical gyro passed through. Short gaps stay gaps, as for a
+    // physical IMU; only a sustained loss moves it to the other gyro
+    const uint8_t other = 1 - v.gyro_source;
+    if (gyro_present & (1U<<v.gyro_source)) {
+        v.gyro_source_ok_ms = now_ms;
+    } else if (now_ms - v.gyro_source_ok_ms >= VIRTUAL_IMU_GYRO_SWITCH_MS && (gyro_present & (1U<<other))) {
+        v.gyro_source = other;
+        v.gyro_source_ok_ms = now_ms;
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "IMU%u: gyro now from IMU%u", vi+1, v.gyro_source+1);
     }
     const uint8_t g = v.gyro_source;
-    if (use_gyro(g)) {
+    if (gyro_present & (1U<<g)) {
         _gyro[vi] = _gyro[g];
         _delta_angle[vi] = _delta_angle[g];
         _delta_angle_dt[vi] = _delta_angle_dt[g];
-        _delta_angle_valid[vi] = _delta_angle_valid[g];
+        if (gyro_returning & (1U<<g)) {
+            _delta_angle[vi] *= _loop_delta_t / _delta_angle_dt[g];
+            _delta_angle_dt[vi] = _loop_delta_t;
+        }
+        _delta_angle_valid[vi] = true;
         _gyro_raw_sample_rates[vi] = _gyro_raw_sample_rates[g];
         _gyro_over_sampling[vi] = _gyro_over_sampling[g];
         _gyro_healthy[vi] = true;
     }
 
-    // accel: mean of the two, or the survivor corrected by the held half difference
-    uint8_t mask = 0;
-    for (uint8_t i=0; i<vi; i++) {
-        if (use_accel(i) && _delta_velocity_valid[i] && is_positive(_delta_velocity_dt[i])) {
-            mask |= 1U<<i;
-        }
+    // accel: mean of the two, or one corrected by the held half difference
+    uint8_t mask = accel_present & ~accel_returning;
+    const bool backlog = (mask == 0);
+    if (backlog) {
+        mask = accel_present;
     }
     if (mask == 0b11) {
         const Vector3f rate0 = _delta_velocity[0] / _delta_velocity_dt[0];
         const Vector3f rate1 = _delta_velocity[1] / _delta_velocity_dt[1];
-        // an accel missing from the last update carries that period in
-        // its delta velocity, but the other accel already covered it alone
-        float dt;
-        switch (v.accel_mask) {
-        case 0b01:
-            dt = _delta_velocity_dt[0];
-            break;
-        case 0b10:
-            dt = _delta_velocity_dt[1];
-            break;
-        default:
-            dt = 0.5f * (_delta_velocity_dt[0] + _delta_velocity_dt[1]);
-            break;
-        }
+        const float dt = backlog ? _loop_delta_t : 0.5f * (_delta_velocity_dt[0] + _delta_velocity_dt[1]);
         _delta_velocity[vi] = (rate0 + rate1) * (0.5f * dt);
         _delta_velocity_dt[vi] = dt;
         _accel[vi] = (_accel[0] + _accel[1]) * 0.5f;
-        const Vector3f half_diff = (rate0 - rate1) * 0.5f;
-        if (v.half_diff_valid) {
-            v.half_diff += (half_diff - v.half_diff) * (dt / (dt + VIRTUAL_IMU_HALF_DIFF_TC_S));
-        } else {
-            v.half_diff = half_diff;
-            v.half_diff_valid = true;
+        if (!backlog) {
+            const Vector3f half_diff = (rate0 - rate1) * 0.5f;
+            if (v.half_diff_valid) {
+                v.half_diff += (half_diff - v.half_diff) * (dt / (dt + VIRTUAL_IMU_HALF_DIFF_TC_S));
+            } else {
+                v.half_diff = half_diff;
+                v.half_diff_valid = true;
+            }
         }
         v.pos = (_accel_pos(0).get() + _accel_pos(1).get()) * 0.5f;
         _temperature[vi] = 0.5f * (_temperature[0] + _temperature[1]);
     } else if (mask != 0) {
         const uint8_t a = (mask == 0b01) ? 0 : 1;
         const Vector3f correction = (a == 0) ? -v.half_diff : v.half_diff;
-        _delta_velocity[vi] = _delta_velocity[a] + correction * _delta_velocity_dt[a];
-        _delta_velocity_dt[vi] = _delta_velocity_dt[a];
+        const float dt = backlog ? _loop_delta_t : _delta_velocity_dt[a];
+        _delta_velocity[vi] = (_delta_velocity[a] / _delta_velocity_dt[a] + correction) * dt;
+        _delta_velocity_dt[vi] = dt;
         _accel[vi] = _accel[a] + correction;
         v.pos = _accel_pos(a).get();
         _temperature[vi] = _temperature[a];

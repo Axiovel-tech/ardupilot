@@ -504,6 +504,9 @@ private:
         uint8_t gyro_source;
         // physical accels used in the last update()
         uint8_t accel_mask;
+        uint8_t gyro_present_last;
+        uint8_t accel_present_last;
+        uint32_t gyro_source_ok_ms;
         bool half_diff_valid;
         // low-passed (accel0 - accel1)/2
         Vector3f half_diff;
