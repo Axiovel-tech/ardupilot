@@ -54,6 +54,9 @@
 // initial accel bias uncertainty as a fraction of the state limit
 #define ACCEL_BIAS_LIM_SCALER 0.2f
 
+// height gain since first thrust taken as lift-off for the take-off accel bias variance raise (m)
+#define TKO_ABIAS_LIFTOFF_HGT 0.08f
+
 // target update time for the EKF in msec and sec
 #define EKF_TARGET_DT_MS 12
 #define EKF_TARGET_DT    0.012f
@@ -727,6 +730,9 @@ private:
     // force symmetry on the state covariance matrix
     void ForceSymmetry();
 
+    // raise the Z accel bias variance once per take-off (EK3_ABIAS_TKO)
+    void updateTakeoffAccelBiasVariance();
+
     // constrain variances (diagonal terms) in the state covariance matrix
     void ConstrainVariances();
 
@@ -1214,6 +1220,12 @@ private:
     bool consistentMagData;         // true when the magnetometers are passing consistency checks
     bool motorsArmed;               // true when the motors have been armed
     bool prevMotorsArmed;           // value of motorsArmed from previous frame
+    enum class TkoAbiasState : uint8_t {
+        WAIT_THRUST,
+        WAIT_LIFTOFF,
+        DONE,
+    } tkoAbiasState;
+    ftype tkoAbiasRefPosD;          // vertical position while waiting for first thrust (m)
     bool posVelFusionDelayed;       // true when the position and velocity fusion has been delayed
 #if EK3_FEATURE_OPTFLOW_FUSION
     bool optFlowFusionDelayed;      // true when the optical flow fusion has been delayed

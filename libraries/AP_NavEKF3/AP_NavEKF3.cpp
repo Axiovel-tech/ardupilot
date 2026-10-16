@@ -744,6 +744,15 @@ const AP_Param::GroupInfo NavEKF3::var_info2[] = {
     // @User: Advanced
     AP_GROUPINFO("OPTIONS",  11, NavEKF3, _options, 0),
 
+    // @Param: ABIAS_TKO
+    // @DisplayName: Take-off accelerometer Z bias uncertainty
+    // @Description: Once per take-off the vertical accelerometer bias uncertainty is raised to this value so that a bias step appearing with motor thrust is learned in about a second. A lane using a single accelerometer raises it when the motors start producing thrust; a lane using averaged accelerometers (INS_ACC_AVG) raises it at lift-off. Copter only. Set to 0 to disable.
+    // @Range: 0 0.5
+    // @Increment: 0.05
+    // @Units: m/s/s
+    // @User: Advanced
+    AP_GROUPINFO("ABIAS_TKO", 20, NavEKF3, _accBiasTkoSigma, 0.0f),
+
     AP_GROUPEND
 };
 

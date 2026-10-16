@@ -300,6 +300,8 @@ void NavEKF3_core::InitialiseVariables()
     gpsIsInUse = false;
     motorsArmed = false;
     prevMotorsArmed = false;
+    tkoAbiasState = TkoAbiasState::WAIT_THRUST;
+    tkoAbiasRefPosD = 0;
     memset(&gpsCheckStatus, 0, sizeof(gpsCheckStatus));
     gpsSpdAccPass = false;
     ekfInnovationsPass = false;
@@ -654,6 +656,8 @@ void NavEKF3_core::UpdateFilter(bool predict)
 
         // Predict the covariance growth
         CovariancePrediction(nullptr);
+
+        updateTakeoffAccelBiasVariance();
 
         // Run the IMU prediction step for the GSF yaw estimator algorithm
         // using IMU and optionally true airspeed data.
@@ -1803,6 +1807,69 @@ void NavEKF3_core::CovariancePrediction(Vector3F *rotVarVecPtr)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     verifyTiltErrorVariance();
 #endif
+}
+
+/*
+  The Z accel bias variance collapses on the ground, so a bias step that
+  appears with motor thrust is learned slowly. Raise it once per take-off.
+  A single accel's offset builds during the throttle ramp, so its lane is
+  raised at first thrust. Averaged accels carry little of that offset into
+  the climb and a raise before lift-off is undone by the ground height
+  constraint, so their lane is raised at lift-off.
+ */
+void NavEKF3_core::updateTakeoffAccelBiasVariance()
+{
+    const ftype sigma = frontend->_accBiasTkoSigma.get();
+    if (!is_positive(sigma)) {
+        return;
+    }
+    const bool thrusting = dal.get_motors_thrusting();
+    if (!motorsArmed || (!thrusting && dal.get_time_flying_ms() == 0)) {
+        tkoAbiasState = TkoAbiasState::WAIT_THRUST;
+    }
+
+    switch (tkoAbiasState) {
+    case TkoAbiasState::WAIT_THRUST:
+        tkoAbiasRefPosD = stateStruct.position.z;
+        if (!thrusting) {
+            return;
+        }
+        tkoAbiasState = TkoAbiasState::WAIT_LIFTOFF;
+        FALLTHROUGH;
+
+    case TkoAbiasState::WAIT_LIFTOFF: {
+        const bool averaged = dal.ins().get_accel_averaged(accel_index_active);
+        const bool lifted = stateStruct.position.z < tkoAbiasRefPosD - TKO_ABIAS_LIFTOFF_HGT;
+        if ((averaged && !lifted) ||
+            inhibitDelVelBiasStates || dvelBiasAxisInhibit[2]) {
+            return;
+        }
+        const ftype prevVar = P[15][15];
+        zeroRows(P, 15, 15);
+        zeroCols(P, 15, 15);
+        P[15][15] = MAX(prevVar, sq(sigma * dtEkfAvg));
+        tkoAbiasState = TkoAbiasState::DONE;
+#if HAL_LOGGING_ENABLED
+// @LoggerMessage: XKTO
+// @Description: EKF3 take-off accel Z bias variance raise
+// @Field: TimeUS: Time since system startup
+// @Field: C: EKF3 core this data is for
+// @Field: Trig: 0 at first thrust, 1 at lift-off
+// @Field: Sig: Z accel bias uncertainty set
+// @Field: Prev: Z accel bias uncertainty before the raise
+        AP::logger().WriteStreaming("XKTO", "TimeUS,C,Trig,Sig,Prev", "s#-oo", "F--00", "QBBff",
+                                    dal.micros64(),
+                                    DAL_CORE(core_index),
+                                    uint8_t(averaged),
+                                    float(sigma),
+                                    float(safe_sqrt(prevVar) / dtEkfAvg));
+#endif
+        break;
+    }
+
+    case TkoAbiasState::DONE:
+        break;
+    }
 }
 
 // zero specified range of rows in the state covariance matrix
