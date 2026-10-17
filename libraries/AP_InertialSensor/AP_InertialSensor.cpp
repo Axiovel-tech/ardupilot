@@ -96,6 +96,14 @@ extern const AP_HAL::HAL& hal;
 // time the pass-through gyro must be unusable before switching to the other gyro
 #define VIRTUAL_IMU_GYRO_SWITCH_MS 100
 
+// consistency gate on the accelerometer difference: fast filter time
+// constant, allowed departure from the held difference (m/s/s) and time
+// before the instance is dropped for the rest of the flight. drone logs
+// with motors running peak at 0.45 m/s/s held over 0.2 s (hot take-offs)
+#define VIRTUAL_IMU_GATE_TC_S 0.15f
+#define VIRTUAL_IMU_GATE_THRESH 1.5f
+#define VIRTUAL_IMU_GATE_PERSIST_MS 200
+
 #ifndef HAL_INS_TRIM_LIMIT_DEG
 #define HAL_INS_TRIM_LIMIT_DEG 10
 #endif
@@ -1995,6 +2003,35 @@ void AP_InertialSensor::update_virtual_imu()
         _gyro_healthy[vi] = true;
     }
 
+    // consistency gate: a departure of the accel difference from the held
+    // difference means one accel reads wrong while still healthy. Which one
+    // is unknown, so the instance is not used and the EKF lanes fall back
+    // to the physical IMUs, where the lane selector can isolate it
+    if (!hal.util->get_soft_armed()) {
+        v.gate_latched = false;
+    }
+    if (accel_present == 0b11 && accel_returning == 0) {
+        const Vector3f diff = _accel[0] - _accel[1];
+        if (v.diff_short_valid && v.half_diff_valid) {
+            const float dt = get_delta_time();
+            v.diff_short += (diff - v.diff_short) * (dt / (dt + VIRTUAL_IMU_GATE_TC_S));
+            v.gate_error = (v.diff_short - v.half_diff * 2.0f).length();
+        } else {
+            v.diff_short = diff;
+            v.diff_short_valid = true;
+        }
+        if (v.gate_error <= VIRTUAL_IMU_GATE_THRESH) {
+            v.gate_pending = false;
+        } else if (!v.gate_pending) {
+            v.gate_pending = true;
+            v.gate_pending_ms = now_ms;
+        } else if (!v.gate_latched && hal.util->get_soft_armed() &&
+                   now_ms - v.gate_pending_ms >= VIRTUAL_IMU_GATE_PERSIST_MS) {
+            v.gate_latched = true;
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "IMU%u: accels inconsistent, not used", vi+1);
+        }
+    }
+
     // accel: mean of the two, or one corrected by the held half difference
     uint8_t mask = accel_present & ~accel_returning;
     const bool backlog = (mask == 0);
@@ -2008,7 +2045,7 @@ void AP_InertialSensor::update_virtual_imu()
         _delta_velocity[vi] = (rate0 + rate1) * (0.5f * dt);
         _delta_velocity_dt[vi] = dt;
         _accel[vi] = (_accel[0] + _accel[1]) * 0.5f;
-        if (!backlog) {
+        if (!backlog && !v.gate_pending) {
             const Vector3f half_diff = (rate0 - rate1) * 0.5f;
             if (v.half_diff_valid) {
                 v.half_diff += (half_diff - v.half_diff) * (dt / (dt + VIRTUAL_IMU_HALF_DIFF_TC_S));
@@ -2038,6 +2075,13 @@ void AP_InertialSensor::update_virtual_imu()
         v.degraded_count++;
     }
     v.accel_mask = mask;
+
+    if (v.gate_pending || v.gate_latched) {
+        _gyro_healthy[vi] = false;
+        _delta_angle_valid[vi] = false;
+        _accel_healthy[vi] = false;
+        _delta_velocity_valid[vi] = false;
+    }
 }
 #endif  // AP_INERTIALSENSOR_ACCEL_AVERAGE_ENABLED
 

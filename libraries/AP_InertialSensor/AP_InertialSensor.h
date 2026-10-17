@@ -508,6 +508,13 @@ private:
         bool half_diff_valid;
         // low-passed (accel0 - accel1)/2
         Vector3f half_diff;
+        // consistency gate
+        bool diff_short_valid;
+        Vector3f diff_short;
+        float gate_error;
+        bool gate_pending;
+        bool gate_latched;
+        uint32_t gate_pending_ms;
         uint32_t degraded_count;
     } _virtual_imu;
 #else

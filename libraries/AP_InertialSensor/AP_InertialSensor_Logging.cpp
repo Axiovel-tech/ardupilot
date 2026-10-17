@@ -116,17 +116,21 @@ void AP_InertialSensor::Write_Vibration() const
 // @Field: HX: held half difference of the two accelerometers, X axis
 // @Field: HY: held half difference of the two accelerometers, Y axis
 // @Field: HZ: held half difference of the two accelerometers, Z axis
+// @Field: Gate: consistency gate, 0 passing, 1 failing, 2 failed for the rest of the flight
+// @Field: GErr: departure of the fast-filtered accel difference from the held difference
 void AP_InertialSensor::Write_IAVG() const
 {
     const auto &v = _virtual_imu;
-    AP::logger().WriteStreaming("IAVG", "TimeUS,AMsk,GSrc,NDeg,HX,HY,HZ", "s---ooo", "F---000", "QBBIfff",
+    AP::logger().WriteStreaming("IAVG", "TimeUS,AMsk,GSrc,NDeg,HX,HY,HZ,Gate,GErr", "s---ooo-o", "F---000-0", "QBBIfffBf",
                                 AP_HAL::micros64(),
                                 v.accel_mask,
                                 v.gyro_source,
                                 v.degraded_count,
                                 v.half_diff.x,
                                 v.half_diff.y,
-                                v.half_diff.z);
+                                v.half_diff.z,
+                                uint8_t(v.gate_latched ? 2 : v.gate_pending ? 1 : 0),
+                                v.gate_error);
 }
 #endif
 
