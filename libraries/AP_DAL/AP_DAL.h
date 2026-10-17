@@ -253,6 +253,7 @@ public:
         _RFRH = msg;
         _micros = _RFRH.time_us;
         _millis = _RFRH.time_us / 1000UL;
+        _ins.start_replay_frame();
     }
     void handle_message(const log_RFRN &msg) {
         _RFRN = msg;

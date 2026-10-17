@@ -60,6 +60,25 @@ public:
         _RISI[msg.instance] = msg;
         pos[msg.instance] = AP::ins().get_imu_pos_offset(msg.instance);
         update_filtered(msg.instance);
+        filtered_this_frame |= 1U<<msg.instance;
+    }
+
+    // an unchanged instance has no RISI in the frame but was still
+    // filtered when the log was recorded, before the frame's first EKF update
+    void start_replay_frame() {
+        filtered_this_frame = 0;
+        replay_frame_open = true;
+    }
+    void end_replay_frame() {
+        if (!replay_frame_open) {
+            return;
+        }
+        replay_frame_open = false;
+        for (uint8_t i=0; i<ARRAY_SIZE(_RISI); i++) {
+            if (!(filtered_this_frame & (1U<<i))) {
+                update_filtered(i);
+            }
+        }
     }
 
 private:
@@ -74,6 +93,8 @@ private:
     Vector3f accel_filtered[INS_MAX_INSTANCES];
 
     uint8_t _primary_gyro;
+    uint8_t filtered_this_frame;
+    bool replay_frame_open;
 
     void update_filtered(uint8_t i);
 };

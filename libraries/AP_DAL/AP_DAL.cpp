@@ -445,6 +445,7 @@ void AP_DAL::writeTerrainData(float alt_m)
 void AP_DAL::handle_message(const log_RFRF &msg, NavEKF2 &ekf2, NavEKF3 &ekf3)
 {
     _RFRF.core_slow = msg.core_slow;
+    _ins.end_replay_frame();
 
     /*
       note that we need to handle the case of LOG_REPLAY=1 with
