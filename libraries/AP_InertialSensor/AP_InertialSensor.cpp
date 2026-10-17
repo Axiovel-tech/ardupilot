@@ -96,6 +96,9 @@ extern const AP_HAL::HAL& hal;
 // time the pass-through gyro must be unusable before switching to the other gyro
 #define VIRTUAL_IMU_GYRO_SWITCH_MS 100
 
+// time an accel must be missing before its loss from the average is reported
+#define VIRTUAL_IMU_ACCEL_REPORT_MS 100
+
 // consistency gate on the accelerometer difference: fast filter time
 // constant, allowed departure from the held difference (m/s/s) and time
 // before the instance is dropped for the rest of the flight. drone logs
@@ -1971,6 +1974,19 @@ void AP_InertialSensor::update_virtual_imu()
         }
         if (use_accel(i) && _delta_velocity_valid[i] && is_positive(_delta_velocity_dt[i])) {
             accel_present |= 1U<<i;
+        }
+    }
+    for (uint8_t i=0; i<vi; i++) {
+        const uint8_t bit = 1U<<i;
+        if (accel_present & bit) {
+            v.accel_ok_ms[i] = now_ms;
+            if (v.accel_out_reported & bit) {
+                v.accel_out_reported &= ~bit;
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "IMU%u: IMU%u accel back", vi+1, i+1);
+            }
+        } else if (!(v.accel_out_reported & bit) && now_ms - v.accel_ok_ms[i] >= VIRTUAL_IMU_ACCEL_REPORT_MS) {
+            v.accel_out_reported |= bit;
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "IMU%u: IMU%u accel lost", vi+1, i+1);
         }
     }
     const uint8_t gyro_returning = gyro_present & ~v.gyro_present_last;

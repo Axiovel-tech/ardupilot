@@ -508,6 +508,8 @@ private:
         bool half_diff_valid;
         // low-passed (accel0 - accel1)/2
         Vector3f half_diff;
+        uint32_t accel_ok_ms[2];
+        uint8_t accel_out_reported;
         // consistency gate
         bool diff_short_valid;
         Vector3f diff_short;
