@@ -2094,6 +2094,7 @@ void AP_InertialSensor::update_virtual_imu()
     v.accel_mask = mask;
 
     if (v.gate_pending || v.gate_latched) {
+        v.not_averaged_ms = now_ms;
         _gyro_healthy[vi] = false;
         _delta_angle_valid[vi] = false;
         _accel_healthy[vi] = false;
