@@ -207,11 +207,26 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         _show_data = nullptr;
     }
 
-    if (AP::FS().stat(GDMB_SHOW_FILE, &stat_data) == 0)
+    const bool has_gdmb = AP::FS().stat(GDMB_SHOW_FILE, &stat_data) == 0;
+    const bool has_skyb = AP::FS().stat(SHOW_FILE, &stat_data) == 0;
+
+    if (has_gdmb && has_skyb)
     {
-        // A .gdmb show takes precedence over a .skyb show. If it is invalid,
-        // no show is loaded at all: falling back to the .skyb file would fly
-        // a show that the operator did not upload last.
+        // A new show may only be uploaded after the loaded one was removed
+        // (MAV_CMD_USER_1 with param1 = 1 removes both files). Two files
+        // mean that a writer skipped that step, and there is no way to tell
+        // which of them the operator uploaded last, so neither is flown.
+        hal.console->printf("Two show files present: %s and %s\n", GDMB_SHOW_FILE, SHOW_FILE);
+        gcs().send_text(
+            MAV_SEVERITY_ERROR,
+            "Two show files present (.gdmb and .skyb): remove the show and upload again"
+        );
+        return false;
+    }
+
+    if (has_gdmb)
+    {
+        // If the .gdmb file is invalid, no show is loaded.
         if (!_read_file_into_memory(GDMB_SHOW_FILE, GDMB_MAX_FILE_SIZE, &show_data, &show_length))
         {
             gcs().send_text(MAV_SEVERITY_ERROR, "Show file %s could not be read", GDMB_SHOW_FILE);
@@ -220,7 +235,7 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
 
         success = _load_gdmb_show_from_memory(show_data, show_length);
     }
-    else if (AP::FS().stat(SHOW_FILE, &stat_data) == 0)
+    else if (has_skyb)
     {
         if (!_read_file_into_memory(SHOW_FILE, SIZE_MAX, &show_data, &show_length))
         {

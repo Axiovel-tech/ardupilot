@@ -73,8 +73,8 @@
 #define SHOW_FILE (HAL_BOARD_COLLMOT_DIRECTORY "/show.skyb")
 
 // Directory and file of .gdmb shows (AxioStack contracts/gdm-format.md §9.3).
-// When the .gdmb file exists, it is the show: the .skyb file is ignored, even
-// if the .gdmb file is rejected.
+// Exactly one of the two show files may exist. With both present, no show is
+// loaded; removing the show (MAV_CMD_USER_1, param1 = 1) deletes both.
 #ifndef HAL_BOARD_AXIO_DIRECTORY
 #  if CONFIG_HAL_BOARD == HAL_BOARD_SITL
 #    define HAL_BOARD_AXIO_DIRECTORY "./axio"
