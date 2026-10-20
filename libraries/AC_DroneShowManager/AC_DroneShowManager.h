@@ -21,6 +21,7 @@
 #include "DroneShow_CustomPackets.h"
 #include "DroneShow_Enums.h"
 #include "DroneShow_FenceConfig.h"
+#include "DroneShow_Gdmb.h"
 
 class DroneShowLEDFactory;
 class DroneShowLED;
@@ -443,10 +444,18 @@ public:
     }
 
     // Returns whether trajectory acceleration is fed into ArduPilot's
-    // lower-level position controller.
+    // lower-level position controller. This is opt-in for .skyb shows
+    // (SHOW_CTRL_MODE bit 1) and opt-out for .gdmb shows (bit 2), whose
+    // trajectories are C2 so that their acceleration is continuous.
     bool is_acceleration_control_enabled() const {
+        if (is_gdmb_show_loaded()) {
+            return !(_params.control_mode_flags & DroneShowControl_GdmbAccelerationFeedForwardDisabled);
+        }
         return _params.control_mode_flags & DroneShowControl_AccelerationControlEnabled;
     }
+
+    // Returns whether the loaded show came from a .gdmb file rather than a .skyb file
+    bool is_gdmb_show_loaded() const { return gdmb_show_is_loaded(&_gdmb_show); }
 
     // Returns whether a show file was identified and loaded at boot time
     bool loaded_show_data_successfully() const;
@@ -564,6 +573,9 @@ public:
     // Writes a message logging the execution of an event from the show file into the log
     void write_show_event_log_message(const struct sb_event_s *event, DroneShowEventResult result) const;
 
+    // Writes a message comparing the show reference with the estimated position into the log
+    void write_show_reference_log_message(float time);
+
     static const struct AP_Param::GroupInfo var_info[];
 
     // Number of physical RGB LED outputs driven from the logical show light.
@@ -654,6 +666,9 @@ private:
         // Acceleration feed-forward gain when acceleration control is being used.
         AP_Float acceleration_feedforward_gain;
 
+        // Whether .gdmb shows with MANEUVER segments may be loaded
+        AP_Int8 maneuvers_enabled;
+
         // Largest fraction of the WPNAV acceleration envelope that the show
         // feed-forward may consume.
         AP_Float acceleration_feedforward_max_fraction;
@@ -726,6 +741,28 @@ private:
 
     // Memory area holding the entire show file loaded from the storage
     uint8_t* _show_data;
+
+    // The loaded .gdmb show, indexing into _show_data. Empty when the show
+    // came from a .skyb file. The screenplay then holds the light program
+    // and events of the .gdmb file and a lower-precision copy of its
+    // trajectory, which serves the takeoff and landing logic and the time
+    // axis; flight setpoints are evaluated from the .gdmb file itself.
+    gdmb_show_t _gdmb_show;
+
+    // Reference of a .gdmb show at a given wall-clock time, in the show
+    // coordinate system (metres; derivatives with respect to wall-clock time)
+    struct GdmbReference {
+        int64_t show_time_us;     // time on the .gdmb timeline
+        Vector3f pos_m;
+        Vector3f vel_ms;
+        Vector3f acc_mss;
+        float yaw_rad;            // right-handed (counter-clockwise from above) from the X axis
+        float yaw_rate_rads;
+    };
+
+    // Last reference returned by _get_gdmb_reference_at_seconds(), for logging
+    GdmbReference _gdmb_reference;
+    bool _gdmb_reference_valid;
     
     // Screenplay of the show.
     // 
@@ -984,6 +1021,30 @@ private:
     // This is unlikely and probably indicates bigger problems, but we need to handle
     // it anyway.
     const sb_control_output_t* _get_raw_show_control_output_at_seconds(float time);
+
+    // Evaluates the loaded .gdmb show at the given number of seconds after show
+    // start, following the time axis of the main show scene. Returns false if
+    // no .gdmb show is loaded or the show controller is not in the main show.
+    bool _get_gdmb_reference_at_seconds(float time, GdmbReference& ref);
+
+    // Returns the rate of the time axis of the given scene at the given wall-clock
+    // time, and an estimate of its time derivative
+    static void _get_time_axis_rate_and_derivative(
+        sb_screenplay_scene_t* scene, int32_t time_msec, float& rate, float& rate_derivative
+    );
+
+    // Loads a .gdmb show from memory into _gdmb_show and the screenplay
+    bool _load_gdmb_show_from_memory(uint8_t* data, size_t length);
+
+    // Builds the screenplay scene of a loaded .gdmb show
+    bool _build_scene_from_gdmb_show(sb_screenplay_scene_t* scene);
+
+    // Builds a lower-precision libskybrush copy of the .gdmb trajectory
+    bool _build_trajectory_from_gdmb_show(sb_trajectory_t* trajectory);
+
+    // Reads the given file into a newly allocated buffer, refusing files larger
+    // than max_size bytes. The caller owns the buffer.
+    static bool _read_file_into_memory(const char* path, size_t max_size, uint8_t** data, size_t* length);
     
     // Handles a generic MAVLink DATA* message from the ground station.
     bool _handle_custom_data_message(mavlink_channel_t chan, uint8_t type, void* data, uint8_t length);

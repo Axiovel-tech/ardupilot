@@ -36,6 +36,7 @@ AC_DroneShowManager::AC_DroneShowManager() :
 #endif
     _init_ok(false),
     _show_data(0),
+    _gdmb_reference_valid(false),
     _projected_wall_clock_time_at_takeoff_sec(NAN),
     _start_time_requested_by(StartTimeSource::NONE),
     _start_time_on_internal_clock_usec(0),
@@ -54,6 +55,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     bool ok = true;
 
     AP_Param::setup_object_defaults(this, var_info);
+
+    gdmb_show_init(&_gdmb_show);
     
     ok &= (sb_trajectory_stats_init(&_trajectory_stats) == SB_SUCCESS);
     ok &= (sb_screenplay_init(&_screenplay) == SB_SUCCESS);
@@ -74,6 +77,7 @@ AC_DroneShowManager::~AC_DroneShowManager()
     }
 
     sb_show_controller_destroy(&_show_controller);
+    gdmb_show_free(&_gdmb_show);
     SB_DECREF_STATIC(&_main_show_scene);
     sb_screenplay_destroy(&_screenplay);
     sb_trajectory_stats_destroy(&_trajectory_stats);
@@ -393,6 +397,10 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
             return false;
         }
 
+#if HAL_LOGGING_ENABLED
+        write_show_reference_log_message(elapsed);
+#endif
+
         return true;
     }
     else
@@ -416,6 +424,14 @@ const sb_control_output_t* AC_DroneShowManager::_get_raw_show_control_output_at_
 
 bool AC_DroneShowManager::get_desired_global_position_at_seconds(float time, Location& loc)
 {
+    GdmbReference ref;
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        const sb_vector3_t position_mm { ref.pos_m.x * 1000.0f, ref.pos_m.y * 1000.0f, ref.pos_m.z * 1000.0f };
+        _show_coordinate_system.convert_show_to_global_coordinate(position_mm, loc);
+        return true;
+    }
+
     const sb_control_output_t* output = _get_raw_show_control_output_at_seconds(time);
     sb_vector3_t position;
 
@@ -434,8 +450,15 @@ bool AC_DroneShowManager::get_desired_velocity_neu_in_cms_per_seconds_at_seconds
     sb_vector3_t vec;
     float vel_north, vel_east;
     float orientation_rad = _show_coordinate_system.orientation_rad;
+    GdmbReference ref;
 
-    if (!output || !sb_control_output_get_velocity_if_set(output, &vec))
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        vec.x = ref.vel_ms.x * 1000.0f;   // [m/s] -> [mm/s]
+        vec.y = ref.vel_ms.y * 1000.0f;
+        vec.z = ref.vel_ms.z * 1000.0f;
+    }
+    else if (!output || !sb_control_output_get_velocity_if_set(output, &vec))
     {
         return false;
     }
@@ -456,6 +479,17 @@ bool AC_DroneShowManager::get_desired_velocity_neu_in_cms_per_seconds_at_seconds
 
 bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(float time, Vector3f& acc)
 {
+    const float orientation_rad = _show_coordinate_system.orientation_rad;
+    GdmbReference ref;
+
+    if (_get_gdmb_reference_at_seconds(time, ref)) {
+        // Analytic acceleration of the .gdmb curve, already in wall-clock time
+        acc.x = (cosf(orientation_rad) * ref.acc_mss.x + sinf(orientation_rad) * ref.acc_mss.y) * 100.0f;
+        acc.y = (sinf(orientation_rad) * ref.acc_mss.x - cosf(orientation_rad) * ref.acc_mss.y) * 100.0f;
+        acc.z = ref.acc_mss.z * 100.0f;
+        return true;
+    }
+
     // Keep the show controller and its output-time metadata synchronized with
     // the requested wall-clock instant.
     if (!_get_raw_show_control_output_at_seconds(time)) {
@@ -474,6 +508,7 @@ bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_square
     sb_vector3_with_yaw_t accel_vec;
     sb_vector3_with_yaw_t velocity_vec;
     float warped_rate = 1.0f;
+    float rate_derivative = 0.0f;
 
     if (
         !time_axis ||
@@ -487,26 +522,9 @@ bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_square
         return false;
     }
 
-    const int32_t time_msec = static_cast<int32_t>(output_time.time_msec);
-    sb_time_axis_map_ex(time_axis, time_msec, &warped_rate);
-
-    // The time-axis API exposes tau_dot but not tau_ddot. Estimate the latter
-    // symmetrically over 20 ms. Time-axis ramps are piecewise linear, so this
-    // is exact away from their endpoints and bounded to one controller sample
-    // of averaging at a segment boundary.
-    constexpr int32_t RATE_DERIVATIVE_HALF_WINDOW_MSEC = 10;
-    const int32_t before_msec = MAX(
-        0, time_msec - RATE_DERIVATIVE_HALF_WINDOW_MSEC
+    _get_time_axis_rate_and_derivative(
+        scene, static_cast<int32_t>(output_time.time_msec), warped_rate, rate_derivative
     );
-    const int32_t after_msec = MIN(
-        INT32_MAX, time_msec + RATE_DERIVATIVE_HALF_WINDOW_MSEC
-    );
-    float rate_before;
-    float rate_after;
-    sb_time_axis_map_ex(time_axis, before_msec, &rate_before);
-    sb_time_axis_map_ex(time_axis, after_msec, &rate_after);
-    const float rate_derivative = (rate_after - rate_before) /
-        ((after_msec - before_msec) / 1000.0f);
 
     // Chain rule for p(tau(t)):
     //   d2p/dt2 = p''(tau) * tau_dot^2 + p'(tau) * tau_ddot
@@ -515,7 +533,6 @@ bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_square
     accel_vec.y = accel_vec.y * rate_squared + velocity_vec.y * rate_derivative;
     accel_vec.z = accel_vec.z * rate_squared + velocity_vec.z * rate_derivative;
 
-    const float orientation_rad = _show_coordinate_system.orientation_rad;
     const float acc_north = cosf(orientation_rad) * accel_vec.x + sinf(orientation_rad) * accel_vec.y;
     const float acc_east = sinf(orientation_rad) * accel_vec.x - cosf(orientation_rad) * accel_vec.y;
 
@@ -531,6 +548,16 @@ bool AC_DroneShowManager::get_desired_yaw_cd_and_yaw_rate_cd_s_at_seconds(float 
     const sb_control_output_t* output = _get_raw_show_control_output_at_seconds(time);
     float yaw_deg;
     float yaw_rate_deg_s;
+    GdmbReference ref;
+
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        // .gdmb yaw is right-handed about +z (counter-clockwise from above);
+        // the show coordinate system expects clockwise degrees from its X axis
+        yaw_cd = wrap_360_cd(_show_coordinate_system.convert_show_to_global_yaw_and_scale_to_cd(-degrees(ref.yaw_rad)));
+        yaw_rate_cd_s = -degrees(ref.yaw_rate_rads) * 100.0f;
+        return true;
+    }
     
     if (
         !output ||

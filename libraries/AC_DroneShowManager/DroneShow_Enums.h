@@ -24,6 +24,9 @@ enum DroneShowModeStage {
 enum DroneShowControlModeFlag {
     DroneShowControl_VelocityControlEnabled = 1,
     DroneShowControl_AccelerationControlEnabled = 2,
+    // .gdmb shows send acceleration feed-forward unless this bit is set; bit 1
+    // above only applies to .skyb shows
+    DroneShowControl_GdmbAccelerationFeedForwardDisabled = 4,
 };
 
 // Enum representing the authorization scopes for the start of the show

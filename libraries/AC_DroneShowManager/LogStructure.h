@@ -7,7 +7,8 @@
     LOG_FENCE_STATUS_MSG, \
     LOG_DRONE_SHOW_EVENT_MSG, \
     LOG_SCREENPLAY_ENTRY_MSG, \
-    LOG_CRTH_TRIGGER_MSG
+    LOG_CRTH_TRIGGER_MSG, \
+    LOG_SHOW_REFERENCE_MSG
 
 // @LoggerMessage: SHOW
 // @Description: Drone show mode information
@@ -126,6 +127,44 @@ struct PACKED log_CollectiveRTHTrigger {
     float start_z;
 };
 
+// @LoggerMessage: SHRF
+// @Description: Show trajectory reference and estimated position during the performance, written with every guided mode command
+// @Field: TimeUS: Time since system startup
+// @Field: ShowUS: Time on the show trajectory (warped show clock)
+// @Field: Src: Source of the reference (0: .skyb, 1: .gdmb)
+// @Field: FF: Whether acceleration feed-forward is enabled
+// @Field: PN: Reference position, North of the EKF origin
+// @Field: PE: Reference position, East of the EKF origin
+// @Field: PU: Reference position, up from the EKF origin
+// @Field: VN: Reference velocity, North
+// @Field: VE: Reference velocity, East
+// @Field: VU: Reference velocity, up
+// @Field: AN: Reference acceleration, North
+// @Field: AE: Reference acceleration, East
+// @Field: AU: Reference acceleration, up
+// @Field: N: Estimated position, North of the EKF origin
+// @Field: E: Estimated position, East of the EKF origin
+// @Field: U: Estimated position, up from the EKF origin
+struct PACKED log_ShowReference {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    int64_t show_time_us;
+    uint8_t source;
+    uint8_t accel_ff;
+    float ref_n;
+    float ref_e;
+    float ref_u;
+    float vel_n;
+    float vel_e;
+    float vel_u;
+    float acc_n;
+    float acc_e;
+    float acc_u;
+    float n;
+    float e;
+    float u;
+};
+
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
     { LOG_DRONE_SHOW_MSG, sizeof(log_DroneShowStatus),                  \
       "SHOW", "QiBBifffBBBff", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDist,VDist", "ss--smmm---mm", "FC--C--------" }, \
@@ -136,4 +175,6 @@ struct PACKED log_CollectiveRTHTrigger {
     { LOG_SCREENPLAY_ENTRY_MSG, sizeof(log_ScreenplayEntry),             \
       "SBSP", "QBBBQIff", "TimeUS,Seq,Scene,Index,Origin,Duration,IR,FR", "s---ss--", "F---CC--" }, \
     { LOG_CRTH_TRIGGER_MSG, sizeof(log_CollectiveRTHTrigger),            \
-      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }
+      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }, \
+    { LOG_SHOW_REFERENCE_MSG, sizeof(log_ShowReference),                 \
+      "SHRF", "QqBBffffffffffff", "TimeUS,ShowUS,Src,FF,PN,PE,PU,VN,VE,VU,AN,AE,AU,N,E,U", "ss--mmmnnnooommm", "FF--000000000000" }
