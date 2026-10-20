@@ -106,6 +106,24 @@ uint32_t gdmb_crc32(uint32_t crc, const uint8_t* buf, size_t len)
 }
 
 /* ------------------------------------------------------------------------ */
+/* Show slot format                                                         */
+/* ------------------------------------------------------------------------ */
+
+gdmb_show_file_format_t gdmb_detect_show_file_format(const uint8_t* data, size_t size)
+{
+    if (data == NULL || size < 4) {
+        return GDMB_SHOW_FILE_UNKNOWN;
+    }
+    if (memcmp(data, "GDMB", 4) == 0) {
+        return GDMB_SHOW_FILE_GDMB;
+    }
+    if (memcmp(data, "skyb", 4) == 0) {
+        return GDMB_SHOW_FILE_SKYB;
+    }
+    return GDMB_SHOW_FILE_UNKNOWN;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Error names                                                              */
 /* ------------------------------------------------------------------------ */
 

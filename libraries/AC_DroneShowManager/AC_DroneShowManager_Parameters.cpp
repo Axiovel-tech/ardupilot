@@ -229,6 +229,14 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MNVR_EN", 47, AC_DroneShowManager, _params.maneuvers_enabled, 0),
 
+    // @Param: SLOT_VER
+    // @DisplayName: Show slot version
+    // @Description: Version of the show upload contract this firmware implements, for the ground station to read before uploading. 1: a single show slot, /axio/show.bin, holding a .gdmb or a .skyb show recognised by its first bytes; /collmot/show.skyb is never loaded. Firmware without this parameter does not load shows from /axio/show.bin, so ground stations must not upload to it. Set by the firmware; writes from a ground station are refused.
+    // @Values: 1:Single slot /axio/show.bin, format by magic
+    // @ReadOnly: True
+    // @User: Advanced
+    AP_GROUPINFO_FLAGS("SLOT_VER", 48, AC_DroneShowManager, _params.slot_version, SHOW_SLOT_VERSION, AP_PARAM_FLAG_INTERNAL_USE_ONLY),
+
     // @Param: TAKEOFF_ALT
     // @DisplayName: Takeoff altitude
     // @Description: Altitude above current position to take off to when starting the show

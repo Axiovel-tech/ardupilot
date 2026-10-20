@@ -669,6 +669,10 @@ private:
         // Whether .gdmb shows with MANEUVER segments may be loaded
         AP_Int8 maneuvers_enabled;
 
+        // Show upload contract implemented by this firmware (SHOW_SLOT_VERSION);
+        // read by the ground before uploading
+        AP_Int8 slot_version;
+
         // Largest fraction of the WPNAV acceleration envelope that the show
         // feed-forward may consume.
         AP_Float acceleration_feedforward_max_fraction;

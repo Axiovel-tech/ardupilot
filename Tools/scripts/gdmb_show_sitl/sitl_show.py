@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fly one drone of a show in ArduCopter SITL and measure its tracking error.
 
-The show file is placed in the SITL filesystem before boot (/axio/show.gdmb
-or /collmot/show.skyb, i.e. ./axio and ./collmot in the run directory), the
+The show file (.gdmb or .skyb) is placed in the SITL filesystem's show slot
+before boot (/axio/show.bin, i.e. ./axio/show.bin in the run directory), the
 show is scheduled by GPS time and authorized, and SHOW mode flies it. The
 SHRF log messages (reference and EKF position, NEU metres) are exported to
 CSV and summarized.
@@ -82,11 +82,8 @@ def main():
     if os.path.exists(rundir):
         shutil.rmtree(rundir)
     os.makedirs(os.path.join(rundir, "axio"))
-    os.makedirs(os.path.join(rundir, "collmot"))
-    if args.show.endswith(".gdmb"):
-        shutil.copy(args.show, os.path.join(rundir, "axio", "show.gdmb"))
-    else:
-        shutil.copy(args.show, os.path.join(rundir, "collmot", "show.skyb"))
+    # one slot for both formats; the firmware tells them apart by the magic
+    shutil.copy(args.show, os.path.join(rundir, "axio", "show.bin"))
 
     x, y = args.start_xy
     home_lat, home_lng = offset(ORIGIN_LAT, ORIGIN_LNG, x, -y)  # NWU: east = -y

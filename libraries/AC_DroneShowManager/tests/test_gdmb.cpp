@@ -304,5 +304,23 @@ TEST(Gdmb, flat_attitude_hover_is_identity)
     }
 }
 
+// The show slot holds either format; the loader dispatches on the magic
+TEST(Gdmb, detect_show_file_format)
+{
+    for (const Vector& v : vectors) {
+        EXPECT_EQ(GDMB_SHOW_FILE_GDMB, gdmb_detect_show_file_format(v.data, v.size)) << v.name;
+    }
+
+    const uint8_t skyb[] = { 's', 'k', 'y', 'b', 0x02, 0x01 };
+    EXPECT_EQ(GDMB_SHOW_FILE_SKYB, gdmb_detect_show_file_format(skyb, sizeof(skyb)));
+
+    const uint8_t other[] = { 'G', 'D', 'M', 'C', 0x01 };
+    EXPECT_EQ(GDMB_SHOW_FILE_UNKNOWN, gdmb_detect_show_file_format(other, sizeof(other)));
+    const uint8_t upper[] = { 'S', 'K', 'Y', 'B' };
+    EXPECT_EQ(GDMB_SHOW_FILE_UNKNOWN, gdmb_detect_show_file_format(upper, sizeof(upper)));
+    EXPECT_EQ(GDMB_SHOW_FILE_UNKNOWN, gdmb_detect_show_file_format(skyb, 3));
+    EXPECT_EQ(GDMB_SHOW_FILE_UNKNOWN, gdmb_detect_show_file_format(nullptr, 0));
+}
+
 AP_GTEST_PANIC()
 AP_GTEST_MAIN()

@@ -8,9 +8,10 @@ acceleration feed-forward against `.gdm` complete.
 | File | What |
 |---|---|
 | `run_matrix.py` | flies every drone of a `.gdm` show under each arm, in parallel SITL instances |
-| `sitl_show.py` | one drone: places the show file, boots SITL, schedules the show by GPS time, authorizes it, waits for landing, exports the `SHRF` log messages to `tracking.csv` |
+| `sitl_show.py` | one drone: places the show file in the show slot (`/axio/show.bin`, either format), boots SITL, schedules the show by GPS time, authorizes it, waits for landing, exports the `SHRF` log messages to `tracking.csv` |
 | `analyze.py` | tracking-error statistics (p50, p95, max) per arm, pooled over drones and per drone |
 | `skyc_to_skyb.py` | compiles each drone of a `.skyc` into the `.skyb` Axio Server would upload (run with Axio Server's Python environment) |
+| `check_show_files.py` | SITL check of the show slot: each format loads from `/axio/show.bin`, an unknown magic is refused, the legacy `/collmot/show.skyb` is ignored with a warning, removing the show deletes both, `SHOW_SLOT_VER` is 1 |
 | `axiolight-nav.parm` | AxioLight REVB navigation and show limits, applied on top of SITL's default quad |
 
 ## Arms

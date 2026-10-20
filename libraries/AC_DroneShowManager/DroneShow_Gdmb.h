@@ -190,6 +190,15 @@ bool gdmb_show_has_inverted_flat(const gdmb_show_t* show);
 void gdmb_flat_attitude(const gdmb_real_t a[3], const gdmb_real_t j[3], gdmb_real_t psi,
     gdmb_real_t psi_dot, int sigma, gdmb_real_t R[3][3], gdmb_real_t omega[3], gdmb_real_t* thrust);
 
+/* Format of a file in the show slot, by its first four bytes */
+typedef enum {
+    GDMB_SHOW_FILE_UNKNOWN = 0,
+    GDMB_SHOW_FILE_GDMB,     /* "GDMB" */
+    GDMB_SHOW_FILE_SKYB,     /* "skyb", the libskybrush binary format */
+} gdmb_show_file_format_t;
+
+gdmb_show_file_format_t gdmb_detect_show_file_format(const uint8_t* data, size_t size);
+
 /* AP-CRC32 (spec §4.9): reflected 0x04C11DB7, initial register `crc`, no final XOR */
 uint32_t gdmb_crc32(uint32_t crc, const uint8_t* buf, size_t len);
 

@@ -108,6 +108,8 @@ void AC_DroneShowManager::init(const AC_WPNav* wp_nav)
     _params.start_time_gps_sec.set(-1);
     _params.start_time_gps_msec_offset.set(0);
     _params.authorization.set(DroneShowAuthorization_Revoked);
+    // SHOW_SLOT_VER describes this firmware, whatever was stored before
+    _params.slot_version.set(SHOW_SLOT_VERSION);
 
     _load_show_file_from_storage();
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL

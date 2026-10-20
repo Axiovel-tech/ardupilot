@@ -25,7 +25,9 @@ bool AC_DroneShowManager::reload_or_clear_show(bool do_clear)
     }
 
     if (do_clear) {
-        for (const char* path : { GDMB_SHOW_FILE, SHOW_FILE }) {
+        // The legacy .skyb location is never loaded, but removing the show
+        // removes it too so that its warning goes away
+        for (const char* path : { SHOW_FILE, LEGACY_SHOW_FILE }) {
             if (AP::FS().unlink(path)) {
                 // Error while removing the file; did it exist?
                 if (errno == ENOENT) {
@@ -52,17 +54,15 @@ bool AC_DroneShowManager::_create_show_directory()
     // https://github.com/ArduPilot/ardupilot/issues/16103
     EXPECT_DELAY_MS(3000);
 
-    for (const char* path : { HAL_BOARD_COLLMOT_DIRECTORY, HAL_BOARD_AXIO_DIRECTORY }) {
-        if (AP::FS().mkdir(path) < 0) {
-            if (errno == EEXIST) {
-                // Directory already exists, this is okay
-            } else {
-                hal.console->printf(
-                    "Failed to create directory %s: %s (code %d)\n",
-                    path, strerror(errno), errno
-                );
-                return false;
-            }
+    if (AP::FS().mkdir(HAL_BOARD_AXIO_DIRECTORY) < 0) {
+        if (errno == EEXIST) {
+            // Directory already exists, this is okay
+        } else {
+            hal.console->printf(
+                "Failed to create directory %s: %s (code %d)\n",
+                HAL_BOARD_AXIO_DIRECTORY, strerror(errno), errno
+            );
+            return false;
         }
     }
 
@@ -207,57 +207,65 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         _show_data = nullptr;
     }
 
-    const bool has_gdmb = AP::FS().stat(GDMB_SHOW_FILE, &stat_data) == 0;
-    const bool has_skyb = AP::FS().stat(SHOW_FILE, &stat_data) == 0;
-
-    if (has_gdmb && has_skyb)
+    // Shows uploaded before the single show slot existed are not loaded. The
+    // ground cannot have meant them: it uploads to the slot.
+    if (AP::FS().stat(LEGACY_SHOW_FILE, &stat_data) == 0)
     {
-        // A new show may only be uploaded after the loaded one was removed
-        // (MAV_CMD_USER_1 with param1 = 1 removes both files). Two files
-        // mean that a writer skipped that step, and there is no way to tell
-        // which of them the operator uploaded last, so neither is flown.
-        hal.console->printf("Two show files present: %s and %s\n", GDMB_SHOW_FILE, SHOW_FILE);
         gcs().send_text(
-            MAV_SEVERITY_ERROR,
-            "Two show files present (.gdmb and .skyb): remove the show and upload again"
+            MAV_SEVERITY_WARNING,
+            "Legacy show file %s ignored; upload the show again", LEGACY_SHOW_FILE
         );
-        return false;
     }
 
-    if (has_gdmb)
-    {
-        // If the .gdmb file is invalid, no show is loaded.
-        if (!_read_file_into_memory(GDMB_SHOW_FILE, GDMB_MAX_FILE_SIZE, &show_data, &show_length))
-        {
-            gcs().send_text(MAV_SEVERITY_ERROR, "Show file %s could not be read", GDMB_SHOW_FILE);
-            return false;
-        }
-
-        success = _load_gdmb_show_from_memory(show_data, show_length);
-    }
-    else if (has_skyb)
-    {
-        if (!_read_file_into_memory(SHOW_FILE, SIZE_MAX, &show_data, &show_length))
-        {
-            return false;
-        }
-
-        // Parse the show file and find the trajectory, light program, yaw control data
-        // and event list in it.
-        retval = static_cast<int>(
-            sb_screenplay_update_from_binary_file_in_memory(&_screenplay, show_data, show_length)
-        );
-        success = retval == SB_SUCCESS;
-        if (!success)
-        {
-            hal.console->printf("Error while parsing show file, code: %d\n", retval);
-        }
-    }
-    else
+    if (AP::FS().stat(SHOW_FILE, &stat_data))
     {
         // Show file does not exist. This basically means that the operation
         // was successful.
         return true;
+    }
+
+    if (!_read_file_into_memory(SHOW_FILE, SIZE_MAX, &show_data, &show_length))
+    {
+        gcs().send_text(MAV_SEVERITY_ERROR, "Show file %s could not be read", SHOW_FILE);
+        return false;
+    }
+
+    // The slot holds either format; the magic decides
+    switch (gdmb_detect_show_file_format(show_data, show_length))
+    {
+        case GDMB_SHOW_FILE_GDMB:
+            // If the .gdmb file is invalid, no show is loaded
+            success = _load_gdmb_show_from_memory(show_data, show_length);
+            break;
+
+        case GDMB_SHOW_FILE_SKYB:
+            // Parse the show file and find the trajectory, light program, yaw control data
+            // and event list in it.
+            retval = static_cast<int>(
+                sb_screenplay_update_from_binary_file_in_memory(&_screenplay, show_data, show_length)
+            );
+            success = retval == SB_SUCCESS;
+            if (!success)
+            {
+                hal.console->printf("Error while parsing show file, code: %d\n", retval);
+                gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb parse error %d", retval);
+            }
+            break;
+
+        default:
+        {
+            char magic[9] = { 0 };
+            for (size_t i = 0; i < 4 && i < show_length; i++)
+            {
+                hal.util->snprintf(magic + 2 * i, 3, "%02x", show_data[i]);
+            }
+            gcs().send_text(
+                MAV_SEVERITY_ERROR, "Show rejected: unknown format (magic %s)",
+                show_length > 0 ? magic : "empty"
+            );
+            success = false;
+            break;
+        }
     }
     
     if (success)
