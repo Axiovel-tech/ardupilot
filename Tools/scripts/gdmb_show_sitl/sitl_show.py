@@ -21,6 +21,7 @@ import math
 import os
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import time
@@ -76,6 +77,10 @@ def main():
     ap.add_argument("--duration", type=float, required=True, help="show duration in seconds")
     ap.add_argument("--lead", type=float, default=40.0, help="seconds from scheduling to show start")
     ap.add_argument("--param", action="append", default=[])
+    ap.add_argument("--time-axis", action="store_true",
+                    help="schedule the show with a TIME_AXIS_CONFIG packet, as the ground does, so that "
+                         "the main scene ends at the computed landing time and LAND takes over there; "
+                         "without it, SHOW_START_TIME is set and the whole trajectory is flown")
     args = ap.parse_args()
 
     rundir = os.path.abspath(args.rundir)
@@ -142,7 +147,19 @@ def main():
         unix = m.time_unix_usec / 1e6
         gps = unix - GPS_EPOCH_UNIX + GPS_LEAP_SECONDS
         start_tow = int(gps + args.lead) % GPS_WEEK
-        set_param(mav, "SHOW_START_TIME", start_tow)
+        if args.time_axis:
+            # DATA64, type 0x5C (GCS to drone), subtype 5 (TIME_AXIS_CONFIG):
+            # header (seq, scenes, reserved, start time in UNIX ms), one scene
+            # (entries, origin, id 0 = main show) with one entry of duration 0,
+            # which covers the trajectory up to the landing time at rate 1
+            start_unix_ms = (int(gps + args.lead) - GPS_LEAP_SECONDS + GPS_EPOCH_UNIX) * 1000
+            body = bytes([5]) + struct.pack("<BBHQ", 1, 1, 0, start_unix_ms) \
+                + struct.pack("<BIH", 1, 0, 0) + struct.pack("<HHI", 65535, 65535, 0)
+            for _ in range(3):
+                mav.mav.data64_send(0x5C, len(body), body.ljust(64, b"\0"))
+                time.sleep(0.2)
+        else:
+            set_param(mav, "SHOW_START_TIME", start_tow)
         set_param(mav, "SHOW_START_AUTH", 1)
         log(rundir, f"show scheduled at GPS TOW {start_tow}")
 
