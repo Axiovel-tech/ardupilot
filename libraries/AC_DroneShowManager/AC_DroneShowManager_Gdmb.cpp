@@ -33,6 +33,14 @@ bool AC_DroneShowManager::_load_gdmb_show_from_memory(uint8_t* data, size_t leng
     sb_screenplay_scene_t* scene = nullptr;
 
     err = gdmb_show_parse(&_gdmb_show, data, length, &diag);
+    if (err != GDMB_OK && length >= GDMB_HEADER_LENGTH &&
+        ((data[5] & GDMB_FEATURE_MANEUVER) || (data[44] & GDMB_CAP_MANEUVER))) {
+        // MANEUVER is provisional in .gdmb v1 (spec §4.11), so the reader
+        // refuses it by its reserved bits; say what that means
+        hal.console->printf("Show file rejected: %s: maneuvers are not part of .gdmb v1\n", gdmb_error_name(err));
+        gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: maneuvers not supported yet");
+        return false;
+    }
     if (err != GDMB_OK) {
         hal.console->printf(
             "Show file rejected: %s at byte %lu: %s\n",
@@ -49,6 +57,8 @@ bool AC_DroneShowManager::_load_gdmb_show_from_memory(uint8_t* data, size_t leng
     // a STATUSTEXT after "Show rejected: ".
     const char* refusal = nullptr;
     if (_gdmb_show.capabilities & GDMB_CAP_MANEUVER) {
+        // Unreachable while maneuvers are provisional: kept for when they are
+        // adopted and the reader accepts them
         refusal = _params.maneuvers_enabled
             ? "maneuvers not supported yet"
             : "maneuvers disabled (SHOW_MNVR_EN=0)";

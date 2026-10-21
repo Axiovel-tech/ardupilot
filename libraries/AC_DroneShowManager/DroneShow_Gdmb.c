@@ -28,7 +28,8 @@
 #define THRUST_SCALE 1000    /* 1 mm/s² */
 #define QUAT_SCALE 32767
 #define US_PER_SEC 1000000
-#define MIN_DURATION_US 1000u
+#define MIN_FLAT_DURATION_US 100000u /* spec §4.5 */
+#define MIN_KNOT_US 1000u            /* provisional MANEUVER knot spacing */
 
 #define G_MSS GDMB_R(980665, 100000) /* §1.1, ArduPilot's GRAVITY_MSS */
 
@@ -236,8 +237,8 @@ static gdmb_error_t read_flat_record(reader_t* r, bool reversible, flat_record_t
         FAIL(diag, GDMB_E_FRAMING, at, "segment record truncated");
     }
     rec->dur_us = rd_u32(r->data + r->pos);
-    if (rec->dur_us < MIN_DURATION_US) {
-        FAIL(diag, GDMB_E_DURATION, at, "segment shorter than 1000 us");
+    if (rec->dur_us < MIN_FLAT_DURATION_US) {
+        FAIL(diag, GDMB_E_DURATION, at, "segment shorter than 100 ms");
     }
     r->pos += 4;
 
@@ -521,11 +522,12 @@ void gdmb_flat_attitude(const gdmb_real_t a[3], const gdmb_real_t j[3], gdmb_rea
         zbd[i] = sg * (j[i] - fhj * fh[i]) / fn;
     }
 
+    /* clockwise heading (spec §1.2): psi = +pi/2 points along -y (east) */
     xc[0] = cos(psi);
-    xc[1] = sin(psi);
+    xc[1] = -sin(psi);
     xc[2] = 0;
     xcd[0] = -sin(psi) * psi_dot;
-    xcd[1] = cos(psi) * psi_dot;
+    xcd[1] = -cos(psi) * psi_dot;
     xcd[2] = 0;
 
     vcross(zb, xc, y);
@@ -619,7 +621,7 @@ static gdmb_error_t read_maneuver(reader_t* r, bool reversible, maneuver_t* m, g
     if (m->n < 4) {
         FAIL(diag, GDMB_E_MANEUVER, at + 8, "fewer than 4 control points");
     }
-    if (m->knot_us < MIN_DURATION_US || (uint64_t)m->dur_us != (uint64_t)(m->n - 3) * m->knot_us) {
+    if (m->knot_us < MIN_KNOT_US || (uint64_t)m->dur_us != (uint64_t)(m->n - 3) * m->knot_us) {
         FAIL(diag, GDMB_E_DURATION, at, "maneuver duration != (N - 3) * knot_us");
     }
 
@@ -1185,11 +1187,12 @@ static int block_rank(uint8_t type)
 
 /* Pass 1: headers, block framing and order, structural parse of the motion
  * blocks. Counts index entries. */
-static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint8_t features,
+static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint32_t header_length,
+    bool provisional, uint8_t features,
     uint32_t* num_entries, uint32_t* num_maneuvers, gdmb_diag_t* diag)
 {
     const bool reversible = (features & GDMB_FEATURE_REVERSIBLE_THRUST) != 0;
-    uint32_t pos = GDMB_HEADER_LENGTH;
+    uint32_t pos = header_length;
     int last_rank = 0;
     int last_motion = 0;
     bool seen[6] = { false, false, false, false, false, false };
@@ -1217,7 +1220,8 @@ static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint8_t 
         if (flags & ~BLOCK_FLAG_SKIPPABLE) {
             FAIL(diag, GDMB_E_RESERVED, pos + 1, "reserved block flag bits set");
         }
-        if (type == 0x00 || type == BLOCK_YAW_RESERVED) {
+        if (type == 0x00 || type == BLOCK_YAW_RESERVED ||
+            (!provisional && (type == BLOCK_MANEUVER || type == BLOCK_RTH_PLAN || type == BLOCK_ENVELOPES))) {
             FAIL(diag, GDMB_E_BLOCK_TYPE, pos, "block type reserved in v1");
         }
         if (block_rank(type) < 0 && !(flags & BLOCK_FLAG_SKIPPABLE)) {
@@ -1227,7 +1231,7 @@ static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint8_t 
     }
 
     /* Canonical order (§4.4) */
-    pos = GDMB_HEADER_LENGTH;
+    pos = header_length;
     while (pos < size) {
         uint8_t type = data[pos];
         uint32_t len = rd_u32(data + pos + 2);
@@ -1257,11 +1261,11 @@ static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint8_t 
         pos += 6 + len;
     }
     if (!any_motion || last_motion != BLOCK_FLAT) {
-        FAIL(diag, GDMB_E_BLOCK_ORDER, GDMB_HEADER_LENGTH, "motion must start and end with FLAT_TRAJECTORY");
+        FAIL(diag, GDMB_E_BLOCK_ORDER, header_length, "motion must start and end with FLAT_TRAJECTORY");
     }
 
     /* Structural parse of the motion blocks */
-    pos = GDMB_HEADER_LENGTH;
+    pos = header_length;
     while (pos < size) {
         uint8_t type = data[pos];
         uint32_t len = rd_u32(data + pos + 2);
@@ -1322,7 +1326,7 @@ static gdmb_error_t parse_timeline(gdmb_show_t* show, gdmb_diag_t* diag)
 {
     const uint8_t* data = show->data;
     const uint32_t size = show->size;
-    uint32_t pos = GDMB_HEADER_LENGTH;
+    uint32_t pos = show->header_length;
     uint32_t n = 0;
     uint64_t total = 0;
     int32_t cur[4] = { 0, 0, 0, 0 };
@@ -1453,7 +1457,7 @@ static gdmb_error_t parse_ancillary(gdmb_show_t* show, gdmb_diag_t* diag)
 {
     const uint8_t* data = show->data;
     const uint32_t size = show->size;
-    uint32_t pos = GDMB_HEADER_LENGTH;
+    uint32_t pos = show->header_length;
     gdmb_error_t err;
 
     while (pos < size) {
@@ -1510,9 +1514,11 @@ static gdmb_error_t parse_ancillary(gdmb_show_t* show, gdmb_diag_t* diag)
     return GDMB_OK;
 }
 
-static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, gdmb_diag_t* diag)
+static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, uint32_t flags, gdmb_diag_t* diag)
 {
+    const bool provisional = (flags & GDMB_PARSE_PROVISIONAL) != 0;
     uint8_t features;
+    uint16_t header_length;
     uint32_t caps, crc, num_entries, num_maneuvers;
     uint8_t zeros[4] = { 0, 0, 0, 0 };
     gdmb_error_t err;
@@ -1523,11 +1529,15 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
     if (data[0] != 'G' || data[1] != 'D' || data[2] != 'M' || data[3] != 'B') {
         FAIL(diag, GDMB_E_MAGIC, 0, "bad magic");
     }
-    if (data[4] != 1) {
+    /* A reader accepts every version up to its own (§1.8) */
+    if (data[4] < 1 || data[4] > GDMB_READER_VERSION) {
         FAIL(diag, GDMB_E_VERSION, 4, "unsupported version");
     }
-    if (rd_u16(data + 6) != GDMB_HEADER_LENGTH) {
-        FAIL(diag, GDMB_E_HEADER, 6, "header_length is not 48");
+    /* Header bytes past 48 belong to a later version's extension and are
+     * skipped; the CRC still covers them (§4.1) */
+    header_length = rd_u16(data + 6);
+    if (header_length < GDMB_HEADER_LENGTH || header_length > size) {
+        FAIL(diag, GDMB_E_HEADER, 6, "header_length below 48 or beyond the file");
     }
 
     /* CRC of the whole file with bytes 8-11 taken as zero (§4.9) */
@@ -1539,7 +1549,9 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
     }
 
     features = data[5];
-    if (features & ~(GDMB_FEATURE_CRC32 | GDMB_FEATURE_MANEUVER | GDMB_FEATURE_REVERSIBLE_THRUST)) {
+    /* The MANEUVER bit is provisional: reserved in v1 (§4.11) */
+    if (features & ~(GDMB_FEATURE_CRC32 | GDMB_FEATURE_REVERSIBLE_THRUST |
+                     (provisional ? GDMB_FEATURE_MANEUVER : 0u))) {
         FAIL(diag, GDMB_E_RESERVED, 5, "reserved feature bits set");
     }
     if (!(features & GDMB_FEATURE_CRC32)) {
@@ -1547,7 +1559,8 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
     }
 
     caps = rd_u32(data + 44);
-    if (caps & ~(GDMB_CAP_MANEUVER | GDMB_CAP_REVERSIBLE_THRUST | GDMB_CAP_HIGH_TILT)) {
+    if (caps & ~(GDMB_CAP_REVERSIBLE_THRUST | GDMB_CAP_HIGH_TILT |
+                 (provisional ? GDMB_CAP_MANEUVER : 0u))) {
         FAIL(diag, GDMB_E_CAPS, 44, "undefined capability bits set");
     }
     if (((caps & GDMB_CAP_MANEUVER) != 0) != ((features & GDMB_FEATURE_MANEUVER) != 0) ||
@@ -1555,7 +1568,8 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
         FAIL(diag, GDMB_E_CAPS, 44, "capability bits disagree with feature flags");
     }
 
-    err = parse_structure(data, (uint32_t)size, features, &num_entries, &num_maneuvers, diag);
+    err = parse_structure(data, (uint32_t)size, header_length, provisional, features,
+        &num_entries, &num_maneuvers, diag);
     if (err != GDMB_OK) {
         return err;
     }
@@ -1567,6 +1581,7 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
 
     show->data = data;
     show->size = (uint32_t)size;
+    show->header_length = header_length;
     show->features = features;
     show->capabilities = caps;
     show->show_hash = data + 12;
@@ -1582,6 +1597,12 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, g
 
 gdmb_error_t gdmb_show_parse(gdmb_show_t* show, const uint8_t* data, size_t size, gdmb_diag_t* diag)
 {
+    return gdmb_show_parse_ex(show, data, size, 0, diag);
+}
+
+gdmb_error_t gdmb_show_parse_ex(gdmb_show_t* show, const uint8_t* data, size_t size,
+    uint32_t flags, gdmb_diag_t* diag)
+{
     gdmb_error_t err;
 
     gdmb_show_free(show);
@@ -1594,7 +1615,7 @@ gdmb_error_t gdmb_show_parse(gdmb_show_t* show, const uint8_t* data, size_t size
         FAIL(diag, GDMB_E_SIZE, 0, "no data");
     }
 
-    err = parse(show, data, size, diag);
+    err = parse(show, data, size, flags, diag);
     if (err != GDMB_OK) {
         gdmb_show_free(show);
     }

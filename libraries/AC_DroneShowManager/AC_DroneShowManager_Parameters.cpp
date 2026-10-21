@@ -224,7 +224,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: MNVR_EN
     // @DisplayName: Enable .gdmb maneuvers
-    // @Description: Allows loading .gdmb shows that contain MANEUVER segments (flips and other attitude maneuvers). This firmware has no maneuver executor yet, so such shows are refused whatever the value; with 0 the refusal names this parameter.
+    // @Description: Allows loading .gdmb shows that contain MANEUVER segments (flips and other attitude maneuvers). Maneuvers are provisional in .gdmb version 1 and this firmware has no maneuver executor yet, so such shows are refused whatever the value. The parameter takes effect once maneuvers are adopted.
     // @Values: 0:Disabled,1:Enabled
     // @User: Advanced
     AP_GROUPINFO("MNVR_EN", 47, AC_DroneShowManager, _params.maneuvers_enabled, 0),

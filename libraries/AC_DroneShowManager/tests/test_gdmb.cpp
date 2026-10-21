@@ -53,6 +53,22 @@ void recompute_crc(std::vector<uint8_t>& b)
     b[11] = (crc >> 24) & 0xFF;
 }
 
+// Vectors under provisional/ are read with the provisional layouts enabled
+uint32_t parse_flags(bool provisional)
+{
+    return provisional ? GDMB_PARSE_PROVISIONAL : 0;
+}
+
+const Vector& vector_named(const char* name)
+{
+    for (const Vector& v : vectors) {
+        if (strcmp(v.name, name) == 0) {
+            return v;
+        }
+    }
+    abort();
+}
+
 class Show {
 public:
     Show() { gdmb_show_init(&show); }
@@ -73,7 +89,7 @@ TEST(Gdmb, golden_vectors_parse_and_crc)
     for (const Vector& v : vectors) {
         Show s;
         gdmb_diag_t diag;
-        ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, v.data, v.size, &diag))
+        ASSERT_EQ(GDMB_OK, gdmb_show_parse_ex(&s.show, v.data, v.size, parse_flags(v.provisional), &diag))
             << v.name << ": " << gdmb_error_name(diag.code) << " at " << diag.offset << ": " << diag.what;
         EXPECT_TRUE(gdmb_show_is_loaded(&s.show));
 
@@ -89,7 +105,7 @@ TEST(Gdmb, golden_vectors_samples)
 {
     for (const Vector& v : vectors) {
         Show s;
-        ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, v.data, v.size, nullptr)) << v.name;
+        ASSERT_EQ(GDMB_OK, gdmb_show_parse_ex(&s.show, v.data, v.size, parse_flags(v.provisional), nullptr)) << v.name;
 
         for (size_t i = 0; i < v.num_samples; i++) {
             const Sample& e = v.samples[i];
@@ -124,9 +140,11 @@ TEST(Gdmb, flat_single_contents)
 {
     const Vector& v = vectors[0];
     ASSERT_STREQ("flat-single", v.name);
+    ASSERT_FALSE(v.provisional);
 
     Show s;
     ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, v.data, v.size, nullptr));
+    EXPECT_EQ(GDMB_HEADER_LENGTH, s.show.header_length);
     EXPECT_EQ(18000000u, s.show.duration_us);
     EXPECT_EQ(0u, s.show.num_maneuvers);
     EXPECT_EQ(GDMB_FEATURE_CRC32, s.show.features);
@@ -135,8 +153,8 @@ TEST(Gdmb, flat_single_contents)
     EXPECT_NE(nullptr, s.show.lights);
     EXPECT_GT(s.show.lights_length, 0u);
     EXPECT_EQ(2u, s.show.num_events);
-    EXPECT_EQ(6u, s.show.num_envelopes);
-    EXPECT_EQ(3u, s.show.num_rth_entries);
+    EXPECT_EQ(0u, s.show.num_envelopes);
+    EXPECT_EQ(0u, s.show.num_rth_entries);
     EXPECT_NE(nullptr, s.show.comment);
 
     gdmb_event_t ev;
@@ -154,16 +172,34 @@ TEST(Gdmb, flat_single_contents)
     EXPECT_DOUBLE_EQ(0.0, st.a[2]);
 }
 
-TEST(Gdmb, maneuver_single_contents)
+TEST(Gdmb, provisional_contents)
 {
-    const Vector& v = vectors[1];
-    ASSERT_STREQ("maneuver-single", v.name);
-
+    const Vector& m = vector_named("provisional/maneuver-single");
     Show s;
-    ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, v.data, v.size, nullptr));
+    ASSERT_EQ(GDMB_OK, gdmb_show_parse_ex(&s.show, m.data, m.size, GDMB_PARSE_PROVISIONAL, nullptr));
     EXPECT_EQ(1u, s.show.num_maneuvers);
     EXPECT_TRUE(s.show.features & GDMB_FEATURE_MANEUVER);
     EXPECT_TRUE(s.show.capabilities & GDMB_CAP_MANEUVER);
+
+    const Vector& r = vector_named("provisional/flat-rth");
+    Show t;
+    ASSERT_EQ(GDMB_OK, gdmb_show_parse_ex(&t.show, r.data, r.size, GDMB_PARSE_PROVISIONAL, nullptr));
+    EXPECT_EQ(6u, t.show.num_envelopes);
+    EXPECT_EQ(3u, t.show.num_rth_entries);
+}
+
+// A v1 reader refuses the provisional layouts (spec §4.11): feature bit 1
+// with E_RESERVED, the RTH_PLAN and ENVELOPES blocks with E_BLOCK_TYPE
+TEST(Gdmb, v1_refuses_provisional_vectors)
+{
+    Show s;
+    const Vector& m = vector_named("provisional/maneuver-single");
+    EXPECT_EQ(GDMB_E_RESERVED, gdmb_show_parse(&s.show, m.data, m.size, nullptr));
+    EXPECT_FALSE(gdmb_show_is_loaded(&s.show));
+
+    const Vector& r = vector_named("provisional/flat-rth");
+    EXPECT_EQ(GDMB_E_BLOCK_TYPE, gdmb_show_parse(&s.show, r.data, r.size, nullptr));
+    EXPECT_FALSE(gdmb_show_is_loaded(&s.show));
 }
 
 // Acceleration is continuous across every FLAT/FLAT joint of the golden
@@ -172,7 +208,7 @@ TEST(Gdmb, joints_are_c2)
 {
     for (const Vector& v : vectors) {
         Show s;
-        ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, v.data, v.size, nullptr));
+        ASSERT_EQ(GDMB_OK, gdmb_show_parse_ex(&s.show, v.data, v.size, parse_flags(v.provisional), nullptr));
         for (uint32_t i = 1; i < s.show.num_segments; i++) {
             const gdmb_segment_t& a = s.show.segments[i - 1];
             const gdmb_segment_t& b = s.show.segments[i];
@@ -198,7 +234,7 @@ TEST(Gdmb, reject_and_accept_vectors)
     for (const Edge& e : edges) {
         Show s;
         gdmb_diag_t diag;
-        const gdmb_error_t err = gdmb_show_parse(&s.show, e.data, e.size, &diag);
+        const gdmb_error_t err = gdmb_show_parse_ex(&s.show, e.data, e.size, parse_flags(e.provisional), &diag);
         if (e.code) {
             EXPECT_STREQ(e.code, gdmb_error_name(err)) << e.name << ": " << diag.what;
             EXPECT_FALSE(gdmb_show_is_loaded(&s.show)) << e.name;
@@ -222,8 +258,8 @@ TEST(Gdmb, reject_and_accept_vectors)
         }
     }
 
-    EXPECT_EQ(27u, rejects);
-    EXPECT_EQ(1u, accepts);
+    EXPECT_EQ(31u, rejects);  // 20 v1 + 11 provisional
+    EXPECT_EQ(2u, accepts);   // skippable unknown block, header extension
 }
 
 // The E_SIZE recipe of edge/index.json: flat-single plus a skippable COMMENT
@@ -259,7 +295,7 @@ TEST(Gdmb, robust_against_corruption)
             // a cut at a block boundary that only drops ancillary blocks is
             // still a valid file, so only require that a loaded show evaluates
             Show s;
-            if (gdmb_show_parse(&s.show, b.data(), b.size(), nullptr) == GDMB_OK) {
+            if (gdmb_show_parse_ex(&s.show, b.data(), b.size(), parse_flags(v.provisional), nullptr) == GDMB_OK) {
                 gdmb_state_t st;
                 EXPECT_EQ(GDMB_OK, gdmb_show_evaluate(&s.show, s.show.duration_us / 2, &st));
             }
@@ -271,7 +307,7 @@ TEST(Gdmb, robust_against_corruption)
                 b[i] ^= x;
                 recompute_crc(b);
                 Show s;
-                if (gdmb_show_parse(&s.show, b.data(), b.size(), nullptr) == GDMB_OK) {
+                if (gdmb_show_parse_ex(&s.show, b.data(), b.size(), parse_flags(v.provisional), nullptr) == GDMB_OK) {
                     gdmb_state_t st;
                     for (int64_t t = -1000; t <= (int64_t)s.show.duration_us + 1000; t += 100000) {
                         EXPECT_EQ(GDMB_OK, gdmb_show_evaluate(&s.show, t, &st));
@@ -305,6 +341,19 @@ TEST(Gdmb, flat_attitude_hover_is_identity)
 }
 
 // The show slot holds either format; the loader dispatches on the magic
+// The heading is clockwise-positive (spec §1.2, §6.4): psi = +pi/2 points the
+// nose along -y (east in NWU), and a positive yaw rate is a negative body z rate
+TEST(Gdmb, flat_attitude_heading_is_clockwise)
+{
+    const gdmb_real_t a[3] = { 0, 0, 0 }, j[3] = { 0, 0, 0 };
+    gdmb_real_t R[3][3], w[3], f;
+    gdmb_flat_attitude(a, j, M_PI / 2, 0.5, 1, R, w, &f);
+    EXPECT_NEAR(0.0, R[0][0], 1e-12);   // x_b = (0, -1, 0)
+    EXPECT_NEAR(-1.0, R[1][0], 1e-12);
+    EXPECT_NEAR(0.0, R[2][0], 1e-12);
+    EXPECT_NEAR(-0.5, w[2], 1e-12);
+}
+
 TEST(Gdmb, detect_show_file_format)
 {
     for (const Vector& v : vectors) {

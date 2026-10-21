@@ -14,7 +14,13 @@
  *   attitude, body rates and thrust of the SO(3) B-spline.
  *
  * Vehicle policy (which capabilities are enabled) is the caller's business:
- * the parser accepts every capability the format defines.
+ * the parser accepts every capability that v1 defines.
+ *
+ * v1 conformance covers FLAT trajectories, LIGHTS, EVENTS and COMMENT. The
+ * MANEUVER, RTH_PLAN and ENVELOPES layouts are provisional (spec §4.11): a v1
+ * reader refuses them, and gdmb_show_parse() does. gdmb_show_parse_ex() with
+ * GDMB_PARSE_PROVISIONAL also accepts and evaluates them, for work on the
+ * later phases; flight firmware must not use it.
  *
  * This file is plain C99 with no ArduPilot dependency so that another flight
  * firmware can reuse it.
@@ -38,16 +44,20 @@ typedef float gdmb_real_t;
 typedef double gdmb_real_t;
 #endif
 
+/* Highest .gdmb version this reader implements; older versions are accepted (spec §1.8) */
+#define GDMB_READER_VERSION 1u
+
+/* Minimum header length; a longer header is a later version's extension (spec §4.1) */
 #define GDMB_HEADER_LENGTH 48u
 #define GDMB_MAX_FILE_SIZE 262144u
 
 /* Feature flags, header byte 5 (spec §4.2) */
 #define GDMB_FEATURE_CRC32 0x01u
-#define GDMB_FEATURE_MANEUVER 0x02u
+#define GDMB_FEATURE_MANEUVER 0x02u /* provisional (spec §4.11) */
 #define GDMB_FEATURE_REVERSIBLE_THRUST 0x04u
 
 /* Capability bits, header offset 44 (spec §4.3) */
-#define GDMB_CAP_MANEUVER 0x01u
+#define GDMB_CAP_MANEUVER 0x01u /* provisional (spec §4.11) */
 #define GDMB_CAP_REVERSIBLE_THRUST 0x02u
 #define GDMB_CAP_HIGH_TILT 0x04u
 
@@ -109,6 +119,7 @@ typedef struct {
 typedef struct {
     const uint8_t* data;
     uint32_t size;
+    uint16_t header_length;   /* blocks start here */
 
     uint8_t features;
     uint32_t capabilities;
@@ -154,7 +165,7 @@ typedef struct {
     uint32_t segment;          /* index into segments[] */
     int8_t sigma;              /* 0 inside a maneuver */
     gdmb_real_t p[3], v[3], a[3], j[3];
-    gdmb_real_t yaw, yaw_rate; /* not defined inside a maneuver (0) */
+    gdmb_real_t yaw, yaw_rate; /* clockwise-positive from the X axis (spec §1.2); 0 inside a maneuver */
     /* MANEUVER only (zero otherwise): attitude [w, x, y, z], body rates,
      * body angular acceleration and specific thrust along +z_b */
     gdmb_real_t q[4], omega[3], omega_dot[3], thrust;
@@ -174,6 +185,12 @@ void gdmb_show_free(gdmb_show_t* show);
  * ground check) and indexes it. On failure the show is left empty and diag,
  * if not NULL, says why. */
 gdmb_error_t gdmb_show_parse(gdmb_show_t* show, const uint8_t* data, size_t size, gdmb_diag_t* diag);
+
+/* Flags of gdmb_show_parse_ex() */
+#define GDMB_PARSE_PROVISIONAL 0x01u /* also accept the provisional layouts (spec §4.11) */
+
+gdmb_error_t gdmb_show_parse_ex(gdmb_show_t* show, const uint8_t* data, size_t size,
+    uint32_t flags, gdmb_diag_t* diag);
 
 bool gdmb_show_is_loaded(const gdmb_show_t* show);
 
@@ -196,7 +213,8 @@ gdmb_error_t gdmb_show_landing_time(const gdmb_show_t* show, gdmb_real_t xy_thre
 bool gdmb_show_has_inverted_flat(const gdmb_show_t* show);
 
 /* Flatness map of spec §6.4: rotation matrix (body to world, R[row][col]),
- * body rates and signed specific thrust */
+ * body rates and signed specific thrust. psi is the clockwise-positive
+ * heading of spec §1.2. */
 void gdmb_flat_attitude(const gdmb_real_t a[3], const gdmb_real_t j[3], gdmb_real_t psi,
     gdmb_real_t psi_dot, int sigma, gdmb_real_t R[3][3], gdmb_real_t omega[3], gdmb_real_t* thrust);
 
