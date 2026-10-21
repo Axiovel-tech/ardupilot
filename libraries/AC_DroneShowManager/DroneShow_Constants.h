@@ -62,12 +62,19 @@
 // #  define RGB_SOCKET_PORT 4245
 #endif
 
-#ifndef HAL_BOARD_COLLMOT_DIRECTORY
+// The single show slot (AxioStack contracts/gdm-format.md §9.3). It holds a
+// .gdmb or a .skyb show; the loader picks the format by the file's magic.
+#ifndef HAL_BOARD_AXIO_DIRECTORY
 #  if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-#    define HAL_BOARD_COLLMOT_DIRECTORY "./collmot"
+#    define HAL_BOARD_AXIO_DIRECTORY "./axio"
 #  else
-#    define HAL_BOARD_COLLMOT_DIRECTORY "/collmot"
+#    define HAL_BOARD_AXIO_DIRECTORY "/axio"
 #  endif
 #endif
 
-#define SHOW_FILE (HAL_BOARD_COLLMOT_DIRECTORY "/show.skyb")
+#define SHOW_FILE (HAL_BOARD_AXIO_DIRECTORY "/show.bin")
+
+// Value of SHOW_SLOT_VER: 1 = single show slot SHOW_FILE, format by magic.
+// The ground reads it before uploading, so it must change whenever the
+// upload contract does.
+#define SHOW_SLOT_VERSION 1

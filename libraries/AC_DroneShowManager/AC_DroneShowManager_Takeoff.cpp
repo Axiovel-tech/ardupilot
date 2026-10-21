@@ -85,7 +85,10 @@ bool AC_DroneShowManager::notify_takeoff_attempt()
     //
     // This correction is nice to have but is not crucial. If an error happens
     // in the process below, we just bail out and proceed without the correction.
+    //
+    // A .gdmb show is flown exactly as certified, so its end is never modified.
     if (
+        !is_gdmb_show_loaded() &&
         _has_option(DroneShowOption_CorrectLandingPositionForCircularTrajectories) &&
         _trajectory_is_circular && !_trajectory_modified_for_landing
     ) {

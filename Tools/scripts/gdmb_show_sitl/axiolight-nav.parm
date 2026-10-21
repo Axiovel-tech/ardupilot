@@ -1,0 +1,12 @@
+# AxioLight REVB navigation and show limits (AXIOLIGHT-REVB/defaults.parm), on SITL's default quad
+WP_ACC 5
+WP_ACC_Z 5
+WP_JERK 10
+WP_SPD 5
+WP_SPD_DN 4
+WP_SPD_UP 4
+PSC_JERK_NE 20
+PSC_JERK_D 20
+SHOW_CTRL_RATE 50
+SHOW_TAKEOFF_ALT 1
+LAND_SPD_MS 0.5
