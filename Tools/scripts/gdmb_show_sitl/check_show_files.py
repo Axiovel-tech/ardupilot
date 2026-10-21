@@ -7,13 +7,15 @@
 3. A valid CRC is required for both formats: a .gdmb or a .skyb with a
    corrupted byte is refused, and so is a .skyb whose header declares no CRC.
 4. A file with an unknown magic is refused, naming the magic.
+   With --maneuver, a .gdmb with a (provisional) MANEUVER block is refused
+   as "maneuvers not supported yet".
 5. /collmot/show.skyb plays no part: with only that file nothing is loaded
    and nothing is said, and removing the show leaves it alone.
 6. Removing the show (MAV_CMD_USER_1, param1 = 1) deletes the slot.
 
 Every refused file also makes the reload (MAV_CMD_USER_1, param1 = 0) fail.
 
-Usage: check_show_files.py --gdmb FILE --skyb FILE [--binary ...] [--instance N]
+Usage: check_show_files.py --gdmb FILE --skyb FILE [--maneuver FILE] [--binary ...] [--instance N]
 The .skyb must be version 2 with a CRC, as Axio Server writes it.
 Exits non-zero on the first failed expectation.
 """
@@ -84,6 +86,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gdmb", required=True)
     ap.add_argument("--skyb", required=True)
+    ap.add_argument("--maneuver", help="a .gdmb with a MANEUVER block, e.g. gdm-vectors/provisional/maneuver-single/d01.gdmb")
     ap.add_argument("--binary", default=os.path.join(ROOT, "build", "sitl", "bin", "arducopter"))
     ap.add_argument("--instance", type=int, default=40)
     args = ap.parse_args()
@@ -142,12 +145,15 @@ def main():
         expect(result == mavutil.mavlink.MAV_RESULT_ACCEPTED, ".skyb in the slot: reload accepted")
         expect(not any("rejected" in t for t in seen), ".skyb in the slot: no error")
 
-        for name, data, message in (
+        cases = [
             (".gdmb with a corrupted byte", corrupt(gdmb, len(gdmb) // 2), "E_CRC"),
             (".skyb with a corrupted byte", corrupt(skyb, len(skyb) // 2), ".skyb CRC mismatch"),
             (".skyb without CRC", skyb_no_crc, ".skyb without CRC"),
             ("unknown magic", b"PK\x03\x04 not a show", "unknown format (magic 504b0304)"),
-        ):
+        ]
+        if args.maneuver:
+            cases.append((".gdmb with a maneuver", open(args.maneuver, "rb").read(), "maneuvers not supported yet"))
+        for name, data, message in cases:
             put(data)
             result, seen = user1(mav, 0)
             expect(result == mavutil.mavlink.MAV_RESULT_FAILED, f"{name}: reload fails")

@@ -40,6 +40,7 @@ def main():
     ap.add_argument("--first-instance", type=int, default=40)
     ap.add_argument("--drone", action="append", help="only these drone ids")
     ap.add_argument("--param", action="append", default=[])
+    ap.add_argument("--time-axis", action="store_true", help="passed to sitl_show.py")
     args = ap.parse_args()
 
     out = os.path.abspath(args.out)
@@ -84,6 +85,8 @@ def main():
             ]
             for p in args.param:
                 cmd += ["--param", p]
+            if args.time_axis:
+                cmd.append("--time-axis")
             r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=3600)
             ok = os.path.exists(os.path.join(out, job["name"], "result.json"))
             print(job["name"], "OK" if ok else "FAILED " + r.stderr[-300:], flush=True)
