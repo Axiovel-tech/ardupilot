@@ -11,7 +11,7 @@ acceleration feed-forward against `.gdm` complete.
 | `sitl_show.py` | one drone: places the show file in the show slot (`/axio/show.bin`, either format), boots SITL, schedules the show by GPS time, authorizes it, waits for landing, exports the `SHRF` log messages to `tracking.csv` |
 | `analyze.py` | tracking-error statistics (p50, p95, max) per arm, pooled over drones and per drone |
 | `skyc_to_skyb.py` | compiles each drone of a `.skyc` into the `.skyb` Axio Server would upload (run with Axio Server's Python environment) |
-| `check_show_files.py` | SITL check of the show slot: each format loads from `/axio/show.bin`, an unknown magic is refused, the legacy `/collmot/show.skyb` is ignored with a warning, removing the show deletes both, `SHOW_SLOT_VER` is 1 |
+| `check_show_files.py` | SITL check of the show slot: each format loads from `/axio/show.bin`, a corrupted file of either format, a `.skyb` without CRC and an unknown magic are refused, `/collmot/show.skyb` plays no part, removing the show deletes the slot, `SHOW_SLOT_VER` is 1 and cannot be changed |
 | `axiolight-nav.parm` | AxioLight REVB navigation and show limits, applied on top of SITL's default quad |
 
 ## Arms
@@ -28,7 +28,8 @@ acceleration feed-forward against `.gdm` complete.
 ## What is measured
 
 `SHRF` is written with every guided-mode command during the performance
-(`SHOW_CTRL_RATE`, 50 Hz here). It holds the reference position, velocity
+(`SHOW_CTRL_RATE`, 50 Hz here) when `SHOW_OPTIONS` bit 3 is set, which
+`sitl_show.py` does. It holds the reference position, velocity
 and acceleration and the EKF position, all in NEU metres from the EKF origin
 and without the centimetre rounding of `Location`. The error is the EKF
 position minus the reference.

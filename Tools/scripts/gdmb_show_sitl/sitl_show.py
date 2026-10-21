@@ -111,6 +111,7 @@ def main():
             "SHOW_SYNC_MODE": 1,
             "SHOW_CTRL_MODE": args.ctrl_mode,
             "SHOW_POST_ACTION": 1,
+            "SHOW_OPTIONS": 8,  # bit 3: log SHRF
         }
         for p in args.param:
             k, v = p.split("=")
