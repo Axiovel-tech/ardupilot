@@ -182,6 +182,16 @@ gdmb_error_t gdmb_show_evaluate(const gdmb_show_t* show, int64_t t_us, gdmb_stat
 
 bool gdmb_show_get_event(const gdmb_show_t* show, uint32_t index, gdmb_event_t* out);
 
+/* Show time at which the vehicle should hand over to its automatic landing,
+ * in the convention of libskybrush's trajectory statistics: the final run of
+ * the timeline that only descends and stays within xy_threshold_m of the end
+ * position horizontally is "vertical"; landing starts preferred_descent_m above
+ * the end of that run, or at its start if the run is shorter. Evaluated on the
+ * curve itself (sampled every step_us), so a slow sideways creep during the
+ * final descent is not mistaken for a vertical descent. */
+gdmb_error_t gdmb_show_landing_time(const gdmb_show_t* show, gdmb_real_t xy_threshold_m,
+    gdmb_real_t preferred_descent_m, uint32_t step_us, uint32_t* landing_us);
+
 /* True if some FLAT segment of the timeline has sigma = -1 */
 bool gdmb_show_has_inverted_flat(const gdmb_show_t* show);
 
@@ -198,6 +208,10 @@ typedef enum {
 } gdmb_show_file_format_t;
 
 gdmb_show_file_format_t gdmb_detect_show_file_format(const uint8_t* data, size_t size);
+
+/* True if a .skyb header declares a CRC: version 2 with the CRC32 feature
+ * bit. libskybrush verifies the CRC only in that case. */
+bool gdmb_skyb_header_has_crc(const uint8_t* data, size_t size);
 
 /* AP-CRC32 (spec §4.9): reflected 0x04C11DB7, initial register `crc`, no final XOR */
 uint32_t gdmb_crc32(uint32_t crc, const uint8_t* buf, size_t len);

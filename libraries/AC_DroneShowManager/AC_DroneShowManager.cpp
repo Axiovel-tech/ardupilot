@@ -37,6 +37,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _init_ok(false),
     _show_data(0),
     _gdmb_reference_valid(false),
+    _guided_command_warnings_sent(0),
+    _accel_ff_clipped(false),
     _projected_wall_clock_time_at_takeoff_sec(NAN),
     _start_time_requested_by(StartTimeSource::NONE),
     _start_time_on_internal_clock_usec(0),
@@ -203,7 +205,8 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
     const uint8_t YAW_WARNING = 4;
     const uint8_t ACCELERATION_WARNING = 8;
     const uint8_t ACCELERATION_CLIPPED_WARNING = 16;
-    static uint8_t warnings_sent = 0;
+    // Each warning is sent once per show flown; see notify_drone_show_mode_entered_stage()
+    uint8_t& warnings_sent = _guided_command_warnings_sent;
     // static uint8_t counter = 0;
 
     float elapsed = get_elapsed_time_since_start_sec();
@@ -212,6 +215,7 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
     
     command.clear();
     command.yaw_cd = default_yaw_cd;
+    _accel_ff_clipped = false;
 
     if (!get_desired_global_position_at_seconds(elapsed, loc))
     {
@@ -337,7 +341,9 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
                 // in the logs, so make the first occurrence visible. The show
                 // trajectory is meant to be audited against this envelope
                 // before flight; clipping here means that audit was wrong.
-                if ((clipped_xy || !is_equal(unclipped_z, command.acc.z)) &&
+                // SHRF records every clipped command so that clipping can be audited
+                _accel_ff_clipped = clipped_xy || !is_equal(unclipped_z, command.acc.z);
+                if (_accel_ff_clipped &&
                     !(warnings_sent & ACCELERATION_CLIPPED_WARNING))
                 {
                     gcs().send_text(
@@ -400,7 +406,9 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
         }
 
 #if HAL_LOGGING_ENABLED
-        write_show_reference_log_message(elapsed);
+        if (_has_option(DroneShowOption_LogShowReference)) {
+            write_show_reference_log_message(elapsed);
+        }
 #endif
 
         return true;
@@ -554,10 +562,10 @@ bool AC_DroneShowManager::get_desired_yaw_cd_and_yaw_rate_cd_s_at_seconds(float 
 
     if (_get_gdmb_reference_at_seconds(time, ref))
     {
-        // .gdmb yaw is right-handed about +z (counter-clockwise from above);
-        // the show coordinate system expects clockwise degrees from its X axis
-        yaw_cd = wrap_360_cd(_show_coordinate_system.convert_show_to_global_yaw_and_scale_to_cd(-degrees(ref.yaw_rad)));
-        yaw_rate_cd_s = -degrees(ref.yaw_rate_rads) * 100.0f;
+        // .gdmb yaw is clockwise-positive from the show X axis, like .skyc
+        // (AxioStack#89 decision 2), only in unwrapped radians
+        yaw_cd = wrap_360_cd(_show_coordinate_system.convert_show_to_global_yaw_and_scale_to_cd(degrees(ref.yaw_rad)));
+        yaw_rate_cd_s = degrees(ref.yaw_rate_rads) * 100.0f;
         return true;
     }
     
@@ -622,6 +630,9 @@ void AC_DroneShowManager::notify_drone_show_mode_entered_stage(DroneShowModeStag
     // when we receive it)
     if (stage == DroneShow_Takeoff) {
         write_screenplay_log_messages();
+
+        // Warnings about the guided mode commands are sent once per show
+        _guided_command_warnings_sent = 0;
     }
 }
 

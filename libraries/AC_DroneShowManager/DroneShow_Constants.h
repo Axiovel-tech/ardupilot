@@ -62,18 +62,6 @@
 // #  define RGB_SOCKET_PORT 4245
 #endif
 
-#ifndef HAL_BOARD_COLLMOT_DIRECTORY
-#  if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-#    define HAL_BOARD_COLLMOT_DIRECTORY "./collmot"
-#  else
-#    define HAL_BOARD_COLLMOT_DIRECTORY "/collmot"
-#  endif
-#endif
-
-// Location of .skyb shows before the single show slot. Never loaded any more;
-// removed together with the show.
-#define LEGACY_SHOW_FILE (HAL_BOARD_COLLMOT_DIRECTORY "/show.skyb")
-
 // The single show slot (AxioStack contracts/gdm-format.md §9.3). It holds a
 // .gdmb or a .skyb show; the loader picks the format by the file's magic.
 #ifndef HAL_BOARD_AXIO_DIRECTORY

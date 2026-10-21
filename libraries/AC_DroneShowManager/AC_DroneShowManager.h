@@ -760,13 +760,20 @@ private:
         Vector3f pos_m;
         Vector3f vel_ms;
         Vector3f acc_mss;
-        float yaw_rad;            // right-handed (counter-clockwise from above) from the X axis
+        float yaw_rad;            // clockwise-positive (seen from above) from the X axis, unwrapped
         float yaw_rate_rads;
     };
 
     // Last reference returned by _get_gdmb_reference_at_seconds(), for logging
     GdmbReference _gdmb_reference;
     bool _gdmb_reference_valid;
+
+    // Warnings already sent about guided mode commands during the current show
+    uint8_t _guided_command_warnings_sent;
+
+    // Whether the acceleration feed-forward of the last guided mode command
+    // was clipped to the SHOW_ACC_FF_MAX envelope (logged in SHRF)
+    bool _accel_ff_clipped;
     
     // Screenplay of the show.
     // 

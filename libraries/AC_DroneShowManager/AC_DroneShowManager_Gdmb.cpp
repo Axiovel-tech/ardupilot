@@ -78,14 +78,7 @@ bool AC_DroneShowManager::_load_gdmb_show_from_memory(uint8_t* data, size_t leng
         return false;
     }
 
-    // The show hash identifies the show on the ground (spec §3.3)
-    const uint8_t* hash = _gdmb_show.show_hash;
-    gcs().send_text(
-        MAV_SEVERITY_INFO, "Loaded .gdmb show %02x%02x%02x%02x, %.1fs",
-        hash[0], hash[1], hash[2], hash[3],
-        static_cast<double>(_gdmb_show.duration_us * 1.0e-6f)
-    );
-
+    // "Loaded" is announced by the caller, once the trajectory checks pass
     return true;
 }
 
@@ -132,7 +125,7 @@ bool AC_DroneShowManager::_build_scene_from_gdmb_show(sb_screenplay_scene_t* sce
             if (!gdmb_show_get_event(&_gdmb_show, i, &gev)) {
                 goto exit;
             }
-            event.time_msec = (gev.t_us + 500) / 1000;
+            event.time_msec = static_cast<uint32_t>((uint64_t(gev.t_us) + 500) / 1000);
             event.type = static_cast<sb_event_type_t>(gev.type);
             event.subtype = gev.subtype;
             event.payload.as_uint32 = gev.payload;

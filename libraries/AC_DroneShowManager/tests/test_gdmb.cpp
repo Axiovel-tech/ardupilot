@@ -322,5 +322,115 @@ TEST(Gdmb, detect_show_file_format)
     EXPECT_EQ(GDMB_SHOW_FILE_UNKNOWN, gdmb_detect_show_file_format(nullptr, 0));
 }
 
+TEST(Gdmb, skyb_header_has_crc)
+{
+    const uint8_t v2_crc[] = { 's', 'k', 'y', 'b', 2, 0x01, 1, 2, 3, 4 };
+    const uint8_t v2_no_crc[] = { 's', 'k', 'y', 'b', 2, 0x00, 1, 2, 3, 4 };
+    const uint8_t v1[] = { 's', 'k', 'y', 'b', 1, 0x01, 1, 2, 3, 4 };
+    EXPECT_TRUE(gdmb_skyb_header_has_crc(v2_crc, sizeof(v2_crc)));
+    EXPECT_FALSE(gdmb_skyb_header_has_crc(v2_no_crc, sizeof(v2_no_crc)));
+    EXPECT_FALSE(gdmb_skyb_header_has_crc(v1, sizeof(v1)));
+    EXPECT_FALSE(gdmb_skyb_header_has_crc(v2_crc, 9));
+    EXPECT_FALSE(gdmb_skyb_header_has_crc(vectors[0].data, vectors[0].size));
+}
+
+namespace {
+
+// Minimal FLAT-only .gdmb writer for synthetic shows (spec §4, §5).
+// Positions in metres, yaw held at 0.
+struct Seg {
+    uint32_t dur_us;
+    std::vector<double> x, y, z;
+};
+
+void put_u16(std::vector<uint8_t>& b, uint16_t v) { b.push_back(v & 0xFF); b.push_back(v >> 8); }
+void put_u32(std::vector<uint8_t>& b, uint32_t v) { for (int i = 0; i < 4; i++) { b.push_back((v >> (8 * i)) & 0xFF); } }
+void put_i32(std::vector<uint8_t>& b, int32_t v) { put_u32(b, static_cast<uint32_t>(v)); }
+int32_t grid(double m) { return static_cast<int32_t>(lround(m * 10000)); }
+
+std::vector<uint8_t> make_flat_gdmb(const double start[3], const std::vector<Seg>& segs)
+{
+    std::vector<uint8_t> payload;
+    for (int k = 0; k < 3; k++) {
+        put_i32(payload, grid(start[k]));
+    }
+    put_i32(payload, 0);
+    for (const Seg& sg : segs) {
+        put_u16(payload, static_cast<uint16_t>(sg.x.size() | (sg.y.size() << 3) | (sg.z.size() << 6)));
+        put_u32(payload, sg.dur_us);
+        for (const auto* axis : { &sg.x, &sg.y, &sg.z }) {
+            for (double v : *axis) {
+                put_i32(payload, grid(v));
+            }
+        }
+    }
+
+    std::vector<uint8_t> b = { 'G', 'D', 'M', 'B', 1, GDMB_FEATURE_CRC32 };
+    put_u16(b, 48);
+    put_u32(b, 0);                  // CRC, patched below
+    b.insert(b.end(), 32, 0);       // show hash
+    put_u32(b, 0);                  // capabilities
+    b.push_back(0x01);              // FLAT_TRAJECTORY
+    b.push_back(0x00);
+    put_u32(b, payload.size());
+    b.insert(b.end(), payload.begin(), payload.end());
+    recompute_crc(b);
+    return b;
+}
+
+// Rest-to-rest quintic from a to b: P1..P5 (spec §3.6)
+std::vector<double> rest(double a, double b) { return { a, a, b, b, b }; }
+
+}  // namespace
+
+// A final descent that creeps sideways must not count as vertical: the
+// automatic landing starts within the 50 mm threshold of the end position,
+// not where the descent is still far off the pad (review of ardupilot#49:
+// 0.8 m of creep over a 48 s descent).
+TEST(Gdmb, landing_time_with_sideways_creep)
+{
+    const double start[3] = { 0, 0, 0 };
+    const std::vector<uint8_t> b = make_flat_gdmb(start, {
+        { 3000000, {}, {}, rest(0, 2) },              // takeoff to 2 m
+        { 1000000, {}, {}, {} },                      // hold
+        { 48000000, rest(0, 0.8), {}, rest(2, 0) },   // descend 2 m while creeping 0.8 m in x
+    });
+
+    Show s;
+    gdmb_diag_t diag;
+    ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, b.data(), b.size(), &diag)) << diag.what;
+
+    uint32_t landing_us;
+    ASSERT_EQ(GDMB_OK, gdmb_show_landing_time(&s.show, 0.05, 1.0, 10000, &landing_us));
+
+    gdmb_state_t at, end;
+    ASSERT_EQ(GDMB_OK, gdmb_show_evaluate(&s.show, landing_us, &at));
+    ASSERT_EQ(GDMB_OK, gdmb_show_evaluate(&s.show, s.show.duration_us, &end));
+    EXPECT_LE(hypot(at.p[0] - end.p[0], at.p[1] - end.p[1]), 0.05);
+    // A per-piece verticality test would hand over at 1 m, 28 s into the show,
+    // 0.4 m off the pad
+    EXPECT_GT(landing_us, 40000000u);
+}
+
+// A truly vertical final descent hands over preferred_descent above the pad
+TEST(Gdmb, landing_time_vertical_descent)
+{
+    const double start[3] = { 0, 0, 0 };
+    const std::vector<uint8_t> b = make_flat_gdmb(start, {
+        { 3000000, {}, {}, rest(0, 2) },
+        { 1000000, {}, {}, {} },
+        { 48000000, {}, {}, rest(2, 0) },
+    });
+
+    Show s;
+    ASSERT_EQ(GDMB_OK, gdmb_show_parse(&s.show, b.data(), b.size(), nullptr));
+
+    uint32_t landing_us;
+    ASSERT_EQ(GDMB_OK, gdmb_show_landing_time(&s.show, 0.05, 1.0, 10000, &landing_us));
+
+    // z = 1 m at the midpoint of the symmetric descent: 4 s + 24 s
+    EXPECT_NEAR(28.0, landing_us * 1e-6, 0.002);
+}
+
 AP_GTEST_PANIC()
 AP_GTEST_MAIN()

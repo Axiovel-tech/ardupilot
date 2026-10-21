@@ -123,6 +123,13 @@ gdmb_show_file_format_t gdmb_detect_show_file_format(const uint8_t* data, size_t
     return GDMB_SHOW_FILE_UNKNOWN;
 }
 
+bool gdmb_skyb_header_has_crc(const uint8_t* data, size_t size)
+{
+    /* "skyb", version, features, CRC32 */
+    return gdmb_detect_show_file_format(data, size) == GDMB_SHOW_FILE_SKYB &&
+           size >= 10 && data[4] == 2 && (data[5] & 0x01) != 0;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Error names                                                              */
 /* ------------------------------------------------------------------------ */
@@ -1674,6 +1681,73 @@ bool gdmb_show_get_event(const gdmb_show_t* show, uint32_t index, gdmb_event_t* 
     out->subtype = e[5];
     out->payload = rd_u32(e + 6);
     return true;
+}
+
+gdmb_error_t gdmb_show_landing_time(const gdmb_show_t* show, gdmb_real_t xy_threshold_m,
+    gdmb_real_t preferred_descent_m, uint32_t step_us, uint32_t* landing_us)
+{
+    gdmb_state_t end, cur, prev;
+    int64_t t, t_run, lo, hi;
+    gdmb_real_t target;
+    /* quantization slack when comparing heights of neighbouring samples */
+    const gdmb_real_t z_slack = GDMB_R(1, POS_SCALE);
+
+    if (!gdmb_show_is_loaded(show) || step_us == 0 || landing_us == NULL) {
+        return GDMB_E_INVALID;
+    }
+
+    /* Walk back from the end while the curve only descends (going forward)
+     * and stays within the threshold of the final xy */
+    gdmb_show_evaluate(show, show->duration_us, &end);
+    t = show->duration_us;
+    t_run = t;
+    cur = end;
+    while (t > 0) {
+        int64_t tp = t > (int64_t)step_us ? t - (int64_t)step_us : 0;
+        gdmb_show_evaluate(show, tp, &prev);
+        if (prev.regime == GDMB_REGIME_MANEUVER ||
+            prev.p[2] + z_slack < cur.p[2] ||
+            hypot(prev.p[0] - end.p[0], prev.p[1] - end.p[1]) > xy_threshold_m) {
+            break;
+        }
+        t_run = tp;
+        t = tp;
+        cur = prev;
+    }
+
+    /* Hand over preferred_descent_m above the end of the run, but not before
+     * the run starts */
+    gdmb_show_evaluate(show, t_run, &cur);
+    target = end.p[2] + preferred_descent_m;
+    if (cur.p[2] <= target) {
+        *landing_us = (uint32_t)t_run;
+        return GDMB_OK;
+    }
+
+    /* First time after t_run at which the height reaches the target; the run
+     * descends monotonically up to sampling, so bisect within the sample */
+    lo = t_run;
+    for (hi = t_run; hi < (int64_t)show->duration_us; hi += step_us) {
+        gdmb_show_evaluate(show, hi, &cur);
+        if (cur.p[2] <= target) {
+            break;
+        }
+        lo = hi;
+    }
+    if (hi > (int64_t)show->duration_us) {
+        hi = show->duration_us;
+    }
+    while (hi - lo > 1) {
+        int64_t mid = lo + (hi - lo) / 2;
+        gdmb_show_evaluate(show, mid, &cur);
+        if (cur.p[2] <= target) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    *landing_us = (uint32_t)hi;
+    return GDMB_OK;
 }
 
 bool gdmb_show_has_inverted_flat(const gdmb_show_t* show)

@@ -128,11 +128,11 @@ struct PACKED log_CollectiveRTHTrigger {
 };
 
 // @LoggerMessage: SHRF
-// @Description: Show trajectory reference and estimated position during the performance, written with every guided mode command
+// @Description: Show trajectory reference and estimated position during the performance, written with every guided mode command when SHOW_OPTIONS bit 3 is set
 // @Field: TimeUS: Time since system startup
 // @Field: ShowUS: Time on the show trajectory (warped show clock)
 // @Field: Src: Source of the reference (0: .skyb, 1: .gdmb)
-// @Field: FF: Whether acceleration feed-forward is enabled
+// @Field: FF: Acceleration feed-forward: bit 0 enabled, bit 1 clipped to SHOW_ACC_FF_MAX in this command (the A* fields are the unclipped reference)
 // @Field: PN: Reference position, North of the EKF origin
 // @Field: PE: Reference position, East of the EKF origin
 // @Field: PU: Reference position, up from the EKF origin

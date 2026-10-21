@@ -105,7 +105,9 @@ void AC_DroneShowManager::write_show_reference_log_message(float time)
         time_us      : AP_HAL::micros64(),
         show_time_us : show_time_us,
         source       : source,
-        accel_ff     : static_cast<uint8_t>(is_acceleration_control_enabled() ? 1 : 0),
+        accel_ff     : static_cast<uint8_t>(
+            (is_acceleration_control_enabled() ? 1 : 0) | (_accel_ff_clipped ? 2 : 0)
+        ),
         ref_n        : origin_neu_m.x + (c * show_pos_mm.x + s * show_pos_mm.y) / 1000.0f,
         ref_e        : origin_neu_m.y + (s * show_pos_mm.x - c * show_pos_mm.y) / 1000.0f,
         ref_u        : origin_neu_m.z + show_pos_mm.z / 1000.0f,

@@ -231,7 +231,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: SLOT_VER
     // @DisplayName: Show slot version
-    // @Description: Version of the show upload contract this firmware implements, for the ground station to read before uploading. 1: a single show slot, /axio/show.bin, holding a .gdmb or a .skyb show recognised by its first bytes; /collmot/show.skyb is never loaded. Firmware without this parameter does not load shows from /axio/show.bin, so ground stations must not upload to it. Set by the firmware; writes from a ground station are refused.
+    // @Description: Version of the show upload contract this firmware implements, for the ground station to read before uploading. 1: a single show slot, /axio/show.bin, holding a .gdmb or a .skyb show recognised by its first bytes, with a valid CRC required for both (a .skyb must be version 2 with the CRC feature); /collmot/show.skyb is never loaded. Firmware without this parameter does not load shows from /axio/show.bin, so ground stations must not upload to it. Set by the firmware; writes from a ground station are refused.
     // @Values: 1:Single slot /axio/show.bin, format by magic
     // @ReadOnly: True
     // @User: Advanced
@@ -378,7 +378,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @Param: OPTIONS
     // @DisplayName: Show flight mode options
     // @Description: General options related to the show flight mode
-    // @Bitmask: 0:Disable failsafe lights, 1:Attempt to adjust the landing segment of circular trajectories to land at the exact takeoff position, 2:Prevent motor output in show mode (for testing purposes only)
+    // @Bitmask: 0:Disable failsafe lights, 1:Attempt to adjust the landing segment of circular trajectories to land at the exact takeoff position, 2:Prevent motor output in show mode (for testing purposes only), 3:Log the show reference and estimated position (SHRF) with every guided command (about 12 MB/h at SHOW_CTRL_RATE 50)
     // @User: Advanced
     AP_GROUPINFO("OPTIONS", 37, AC_DroneShowManager, _params.show_options, 0),
 

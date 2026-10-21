@@ -25,17 +25,13 @@ bool AC_DroneShowManager::reload_or_clear_show(bool do_clear)
     }
 
     if (do_clear) {
-        // The legacy .skyb location is never loaded, but removing the show
-        // removes it too so that its warning goes away
-        for (const char* path : { SHOW_FILE, LEGACY_SHOW_FILE }) {
-            if (AP::FS().unlink(path)) {
-                // Error while removing the file; did it exist?
-                if (errno == ENOENT) {
-                    // File was missing already, this is OK.
-                } else {
-                    // This is a genuine failure
-                    return false;
-                }
+        if (AP::FS().unlink(SHOW_FILE)) {
+            // Error while removing the file; did it exist?
+            if (errno == ENOENT) {
+                // File was missing already, this is OK.
+            } else {
+                // This is a genuine failure
+                return false;
             }
         }
     }
@@ -207,16 +203,6 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         _show_data = nullptr;
     }
 
-    // Shows uploaded before the single show slot existed are not loaded. The
-    // ground cannot have meant them: it uploads to the slot.
-    if (AP::FS().stat(LEGACY_SHOW_FILE, &stat_data) == 0)
-    {
-        gcs().send_text(
-            MAV_SEVERITY_WARNING,
-            "Legacy show file %s ignored; upload the show again", LEGACY_SHOW_FILE
-        );
-    }
-
     if (AP::FS().stat(SHOW_FILE, &stat_data))
     {
         // Show file does not exist. This basically means that the operation
@@ -239,6 +225,16 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
             break;
 
         case GDMB_SHOW_FILE_SKYB:
+            // A valid CRC is required for both formats. libskybrush checks
+            // the .skyb CRC only when the header declares one (version 2 with
+            // the CRC feature bit), so a file without one is refused here.
+            if (!gdmb_skyb_header_has_crc(show_data, show_length))
+            {
+                gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb without CRC");
+                success = false;
+                break;
+            }
+
             // Parse the show file and find the trajectory, light program, yaw control data
             // and event list in it.
             retval = static_cast<int>(
@@ -248,7 +244,11 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
             if (!success)
             {
                 hal.console->printf("Error while parsing show file, code: %d\n", retval);
-                gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb parse error %d", retval);
+                if (retval == SB_ECORRUPTED) {
+                    gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb CRC mismatch");
+                } else {
+                    gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb parse error %d", retval);
+                }
             }
             break;
 
@@ -278,11 +278,13 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         if (!_recalculate_trajectory_properties())
         {
             hal.console->printf("Error while calculating trajectory properties\n");
+            gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: trajectory properties");
             success = false;
         }
         else if (!is_trajectory_plausible())
         {
             hal.console->printf("Takeoff or landing time is invalid\n");
+            gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: takeoff or landing time invalid");
             success = false;
         }
         else
@@ -293,6 +295,17 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
                 _trajectory_stats.takeoff_time_sec, 
                 _trajectory_stats.landing_time_sec
             );
+
+            if (is_gdmb_show_loaded())
+            {
+                // The show hash identifies the show on the ground (spec §3.3)
+                const uint8_t* hash = _gdmb_show.show_hash;
+                gcs().send_text(
+                    MAV_SEVERITY_INFO, "Loaded .gdmb show %02x%02x%02x%02x, %.1fs",
+                    hash[0], hash[1], hash[2], hash[3],
+                    static_cast<double>(_gdmb_show.duration_us * 1.0e-6f)
+                );
+            }
         }
     }
     
@@ -398,7 +411,36 @@ bool AC_DroneShowManager::_recalculate_trajectory_properties()
         success = true;
     }
 
+    const float preferred_descent_mm = stats_calculator.preferred_descent;
     sb_trajectory_stats_calculator_destroy(&stats_calculator);
+
+    if (success && is_gdmb_show_loaded())
+    {
+        // The libskybrush copy of a .gdmb trajectory is cut into short
+        // pieces, and libskybrush judges verticality per piece, so a final
+        // descent that creeps sideways would look vertical and the automatic
+        // landing would start too early, away from the pad. Take the landing
+        // time from the .gdmb curve itself, with the same threshold (50 mm)
+        // and preferred descent.
+        uint32_t landing_us;
+        gdmb_state_t st;
+        if (
+            gdmb_show_landing_time(
+                &_gdmb_show, 0.05, preferred_descent_mm / 1000.0, 10000, &landing_us
+            ) == GDMB_OK &&
+            gdmb_show_evaluate(&_gdmb_show, landing_us, &st) == GDMB_OK
+        ) {
+            _trajectory_stats.landing_time_sec = landing_us / 1.0e6f;
+            _trajectory_stats.pos_at_landing_time.x = st.p[0] * 1000.0f;
+            _trajectory_stats.pos_at_landing_time.y = st.p[1] * 1000.0f;
+            _trajectory_stats.pos_at_landing_time.z = st.p[2] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.x = st.v[0] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.y = st.v[1] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.z = st.v[2] * 1000.0f;
+        } else {
+            success = false;
+        }
+    }
 
     if (success)
     {
