@@ -6,7 +6,8 @@
    so does a .skyb file.
 3. A valid CRC is required for both formats: a .gdmb or a .skyb with a
    corrupted byte is refused, and so is a .skyb whose header declares no CRC.
-4. A file with an unknown magic is refused, naming the magic.
+4. A file with an unknown magic is refused, naming the magic, and a .gdmb
+   larger than the 262 144 B cap is refused with E_SIZE.
    With --maneuver, a .gdmb with a (provisional) MANEUVER block is refused
    as "maneuvers not supported yet".
 5. /collmot/show.skyb plays no part: with only that file nothing is loaded
@@ -121,6 +122,12 @@ def main():
         mav.wait_heartbeat(timeout=30)
 
         boot = texts(mav, 6)
+
+        # As sitl_show.py flies them: a show lower than the default 2.5 m
+        # takeoff altitude would otherwise fail the takeoff-time check
+        mav.mav.param_set_send(mav.target_system, mav.target_component, b"SHOW_TAKEOFF_ALT", 1,
+                               mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+        time.sleep(1)
         expect(not any("show" in t.lower() for t in boot),
                "only /collmot/show.skyb at boot: nothing loaded, nothing said")
 
@@ -151,6 +158,8 @@ def main():
             (".skyb without CRC", skyb_no_crc, ".skyb without CRC"),
             ("unknown magic", b"PK\x03\x04 not a show", "unknown format (magic 504b0304)"),
         ]
+        # Larger than the .gdmb cap: refused before anything is allocated
+        cases.append((".gdmb over 262 144 B", b"GDMB" + bytes(262145 - 4), "E_SIZE"))
         if args.maneuver:
             cases.append((".gdmb with a maneuver", open(args.maneuver, "rb").read(), "maneuvers not supported yet"))
         for name, data, message in cases:
