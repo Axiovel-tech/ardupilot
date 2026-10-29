@@ -119,22 +119,27 @@ private:
     private:
         // The tag sends samples at about 10 Hz, so 20 samples span ~2 s
         static constexpr uint8_t WINDOW_SAMPLES = 20;
-        static constexpr uint8_t MIN_VALID_SAMPLES = 5;
+        static constexpr uint8_t MIN_VALID_SAMPLES = 3;
+        // Without samples for this long the window is stale: the clock is
+        // invalid and the next sample starts a new window
         static constexpr uint32_t TIMEOUT_MSEC = 2000;
 
         // A sample implying this much less latency than the current estimate
         // cannot be explained by transport jitter; it is ignored unless
         // STEP_CONFIRM_SAMPLES consecutive samples agree on it within
-        // STEP_AGREE_USEC (a genuine step of the show clock, e.g. a re-pin)
+        // STEP_AGREE_USEC (a genuine step of the show clock, e.g. a re-pin),
+        // which then make up the new window
         static constexpr int64_t MAX_AHEAD_USEC = 20000;
         static constexpr uint8_t STEP_CONFIRM_SAMPLES = 3;
         static constexpr int64_t STEP_AGREE_USEC = 5000;
+
+        void push(int64_t offset_usec);
 
         int64_t _window[WINDOW_SAMPLES];
         uint8_t _count;
         uint8_t _next;
         int64_t _offset_usec;
-        int64_t _step_offset_usec;
+        int64_t _step_window[STEP_CONFIRM_SAMPLES];
         uint8_t _step_count;
         uint32_t _last_sample_at_msec;
     };

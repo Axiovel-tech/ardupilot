@@ -223,7 +223,7 @@ AC_DroneShowManager::ShowClock::ShowClock() :
     _count(0),
     _next(0),
     _offset_usec(0),
-    _step_offset_usec(0),
+    _step_window(),
     _step_count(0),
     _last_sample_at_msec(0)
 {
@@ -232,23 +232,38 @@ AC_DroneShowManager::ShowClock::ShowClock() :
 bool AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
 {
     const int64_t offset_usec = int64_t(local_usec) - int64_t(show_time_usec);
+    const uint32_t now_msec = AP_HAL::millis();
+
+    if (_count > 0 && now_msec - _last_sample_at_msec >= TIMEOUT_MSEC) {
+        _count = 0;
+        _next = 0;
+        _step_count = 0;
+    }
 
     if (_count > 0 && offset_usec < _offset_usec - MAX_AHEAD_USEC) {
-        const int64_t step_spread_usec = offset_usec - _step_offset_usec;
-        if (_step_count > 0 && step_spread_usec <= STEP_AGREE_USEC && step_spread_usec >= -STEP_AGREE_USEC) {
-            _step_count++;
-        } else {
-            _step_offset_usec = offset_usec;
-            _step_count = 1;
+        const int64_t step_spread_usec = offset_usec - _step_window[0];
+        if (_step_count == 0 || step_spread_usec > STEP_AGREE_USEC || step_spread_usec < -STEP_AGREE_USEC) {
+            _step_count = 0;
         }
+        _step_window[_step_count++] = offset_usec;
         if (_step_count < STEP_CONFIRM_SAMPLES) {
             return false;
         }
         _count = 0;
         _next = 0;
+        for (uint8_t i = 0; i < STEP_CONFIRM_SAMPLES - 1; i++) {
+            push(_step_window[i]);
+        }
     }
     _step_count = 0;
 
+    push(offset_usec);
+    _last_sample_at_msec = now_msec;
+    return true;
+}
+
+void AC_DroneShowManager::ShowClock::push(int64_t offset_usec)
+{
     _window[_next] = offset_usec;
     _next = (_next + 1) % WINDOW_SAMPLES;
     if (_count < WINDOW_SAMPLES) {
@@ -259,9 +274,6 @@ bool AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint
     for (uint8_t i = 1; i < _count; i++) {
         _offset_usec = MIN(_offset_usec, _window[i]);
     }
-
-    _last_sample_at_msec = AP_HAL::millis();
-    return true;
 }
 
 bool AC_DroneShowManager::ShowClock::is_valid() const
