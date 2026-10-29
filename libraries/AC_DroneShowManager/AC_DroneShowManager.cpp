@@ -37,6 +37,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _init_ok(false),
     _show_data(0),
     _gdmb_reference_valid(false),
+    _show_identity(),
+    _was_armed(false),
     _guided_command_warnings_sent(0),
     _accel_ff_clipped(false),
     _projected_wall_clock_time_at_takeoff_sec(NAN),
@@ -621,6 +623,12 @@ void AC_DroneShowManager::notify_drone_show_mode_entered_stage(DroneShowModeStag
 
     _stage_in_drone_show_mode = stage;
 
+    // The .gdmb reference belongs to the performance; do not keep logging the
+    // last one in the landing, loiter or error stages
+    if (stage != DroneShow_Performing) {
+        _gdmb_reference_valid = false;
+    }
+
     // Force-update preflight checks so we see the errors immediately if we
     // switched to the "waiting for start time" stage
     _update_preflight_check_result(/* force = */ true);
@@ -642,6 +650,7 @@ void AC_DroneShowManager::notify_drone_show_mode_exited()
     _update_rgb_led_instance();
     _clear_start_time_if_set_by_switch();
     _last_setpoint.clear();
+    _gdmb_reference_valid = false;
 }
 
 void AC_DroneShowManager::notify_guided_mode_command_sent(const GuidedModeCommand& command)
@@ -719,6 +728,14 @@ bool AC_DroneShowManager::set_scheduled_start_time_in_gps_time_of_week(
 void AC_DroneShowManager::update()
 {
     static bool main_cycle = true;
+
+    // Record which show is loaded at every arming; dataflash logs start at
+    // arming, so every flight log carries it
+    const bool armed = AP::motors() && AP::motors()->armed();
+    if (armed && !_was_armed) {
+        _announce_show_identity_at_arming();
+    }
+    _was_armed = armed;
 
     // AXIOVEL fork (rtls-link-zephyr#120): evaluate the show lights on every
     // tick (50 Hz) instead of on alternating ticks (25 Hz) so that light

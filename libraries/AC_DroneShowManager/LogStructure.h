@@ -8,7 +8,8 @@
     LOG_DRONE_SHOW_EVENT_MSG, \
     LOG_SCREENPLAY_ENTRY_MSG, \
     LOG_CRTH_TRIGGER_MSG, \
-    LOG_SHOW_REFERENCE_MSG
+    LOG_SHOW_REFERENCE_MSG, \
+    LOG_SHOW_IDENTITY_MSG
 
 // @LoggerMessage: SHOW
 // @Description: Drone show mode information
@@ -165,6 +166,24 @@ struct PACKED log_ShowReference {
     float u;
 };
 
+// @LoggerMessage: SHID
+// @Description: Identity of the loaded show file, written whenever the motors are armed
+// @Field: TimeUS: Time since system startup
+// @Field: Fmt: Format of the show file in /axio/show.bin (0: none, 1: .skyb, 2: .gdmb)
+// @Field: Size: Size of the show file in bytes
+// @Field: HCRC: CRC32 stored in the file header
+// @Field: FCRC: AP-CRC32 of the whole file, as MAVFTP reports it after an upload
+// @Field: Hash: .gdmb show hash (SHA-256, lowercase hex); empty for .skyb
+struct PACKED log_ShowIdentity {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t format;
+    uint32_t size;
+    uint32_t header_crc32;
+    uint32_t file_crc32;
+    char hash[64];
+};
+
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
     { LOG_DRONE_SHOW_MSG, sizeof(log_DroneShowStatus),                  \
       "SHOW", "QiBBifffBBBff", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDist,VDist", "ss--smmm---mm", "FC--C--------" }, \
@@ -177,4 +196,6 @@ struct PACKED log_ShowReference {
     { LOG_CRTH_TRIGGER_MSG, sizeof(log_CollectiveRTHTrigger),            \
       "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }, \
     { LOG_SHOW_REFERENCE_MSG, sizeof(log_ShowReference),                 \
-      "SHRF", "QqBBffffffffffff", "TimeUS,ShowUS,Src,FF,PN,PE,PU,VN,VE,VU,AN,AE,AU,N,E,U", "ss--mmmnnnooommm", "FF--000000000000" }
+      "SHRF", "QqBBffffffffffff", "TimeUS,ShowUS,Src,FF,PN,PE,PU,VN,VE,VU,AN,AE,AU,N,E,U", "ss--mmmnnnooommm", "FF--000000000000" }, \
+    { LOG_SHOW_IDENTITY_MSG, sizeof(log_ShowIdentity),                   \
+      "SHID", "QBIIIZ", "TimeUS,Fmt,Size,HCRC,FCRC,Hash", "s-b---", "F-0---" }

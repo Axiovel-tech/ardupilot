@@ -576,6 +576,9 @@ public:
     // Writes a message comparing the show reference with the estimated position into the log
     void write_show_reference_log_message(float time);
 
+    // Writes a message identifying the loaded show file into the log
+    void write_show_identity_log_message() const;
+
     static const struct AP_Param::GroupInfo var_info[];
 
     // Number of physical RGB LED outputs driven from the logical show light.
@@ -767,6 +770,18 @@ private:
     // Last reference returned by _get_gdmb_reference_at_seconds(), for logging
     GdmbReference _gdmb_reference;
     bool _gdmb_reference_valid;
+
+    // Identity of the loaded show file, logged at arming (SHID) so that ground
+    // tools and flight-log import can tell which show was flown
+    struct {
+        uint8_t format;           // ShowFileFormat
+        uint32_t size;            // bytes
+        uint32_t header_crc32;    // the CRC stored in the file header
+        uint32_t file_crc32;      // AP-CRC32 of the whole file, as MAVFTP reports it
+    } _show_identity;
+
+    // Whether the motors were armed at the last update(), to detect arming
+    bool _was_armed;
 
     // Warnings already sent about guided mode commands during the current show
     uint8_t _guided_command_warnings_sent;
@@ -1052,6 +1067,12 @@ private:
 
     // Builds a lower-precision libskybrush copy of the .gdmb trajectory
     bool _build_trajectory_from_gdmb_show(sb_trajectory_t* trajectory);
+
+    // Logs (SHID) and announces the identity of the loaded show when the motors are armed
+    void _announce_show_identity_at_arming();
+
+    // Reads the first length bytes of the given file into buf
+    static bool _read_file_head(const char* path, uint8_t* buf, size_t length);
 
     // Reads the given file into a newly allocated buffer, refusing files larger
     // than max_size bytes. The caller owns the buffer.

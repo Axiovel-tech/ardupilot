@@ -125,6 +125,30 @@ void AC_DroneShowManager::write_show_reference_log_message(float time)
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }
 
+// Write a log entry identifying the loaded show file
+void AC_DroneShowManager::write_show_identity_log_message() const
+{
+    struct log_ShowIdentity pkt {
+        LOG_PACKET_HEADER_INIT(LOG_SHOW_IDENTITY_MSG),
+        time_us      : AP_HAL::micros64(),
+        format       : _show_identity.format,
+        size         : _show_identity.size,
+        header_crc32 : _show_identity.header_crc32,
+        file_crc32   : _show_identity.file_crc32,
+        hash         : {},
+    };
+
+    if (_show_identity.format == ShowFileFormat_Gdmb && _gdmb_show.show_hash) {
+        static const char digits[] = "0123456789abcdef";
+        for (uint8_t i = 0; i < 32; i++) {
+            pkt.hash[2 * i] = digits[_gdmb_show.show_hash[i] >> 4];
+            pkt.hash[2 * i + 1] = digits[_gdmb_show.show_hash[i] & 0x0F];
+        }
+    }
+
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}
+
 // Write a geofence status log entry
 void AC_DroneShowManager::write_fence_status_log_message() const
 {

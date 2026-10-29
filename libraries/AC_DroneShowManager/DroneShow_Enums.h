@@ -118,6 +118,13 @@ enum DroneShowOptionFlag {
     DroneShowOption_LogShowReference = 8,
 };
 
+// Format of the loaded show file, as logged in SHID
+enum ShowFileFormat : uint8_t {
+    ShowFileFormat_None = 0,
+    ShowFileFormat_Skyb = 1,
+    ShowFileFormat_Gdmb = 2,
+};
+
 // Enum representing the telemetry profiles supported by the parameter set
 enum TelemetryProfile {
     TelemetryProfile_Standard = 0,

@@ -285,6 +285,32 @@ bool AC_DroneShowManager::_build_trajectory_from_gdmb_show(sb_trajectory_t* traj
     return false;
 }
 
+void AC_DroneShowManager::_announce_show_identity_at_arming()
+{
+#if HAL_LOGGING_ENABLED
+    write_show_identity_log_message();
+#endif
+
+    switch (_show_identity.format) {
+    case ShowFileFormat_Gdmb: {
+        const uint8_t* hash = _gdmb_show.show_hash;
+        gcs().send_text(
+            MAV_SEVERITY_INFO, "Armed with .gdmb show %02x%02x%02x%02x, CRC %08lx",
+            hash[0], hash[1], hash[2], hash[3], static_cast<unsigned long>(_show_identity.header_crc32)
+        );
+        break;
+    }
+    case ShowFileFormat_Skyb:
+        gcs().send_text(
+            MAV_SEVERITY_INFO, "Armed with .skyb show, CRC %08lx",
+            static_cast<unsigned long>(_show_identity.header_crc32)
+        );
+        break;
+    default:
+        break;
+    }
+}
+
 void AC_DroneShowManager::_get_time_axis_rate_and_derivative(
     sb_screenplay_scene_t* scene, int32_t time_msec, float& rate, float& rate_derivative
 )
@@ -315,6 +341,10 @@ void AC_DroneShowManager::_get_time_axis_rate_and_derivative(
 
 bool AC_DroneShowManager::_get_gdmb_reference_at_seconds(float time, GdmbReference& ref)
 {
+    // The logged reference is only valid while an evaluation succeeds; once the
+    // main show has ended (or no .gdmb show is loaded), SHOW stops reporting it
+    _gdmb_reference_valid = false;
+
     if (!is_gdmb_show_loaded()) {
         return false;
     }

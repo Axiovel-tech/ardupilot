@@ -65,6 +65,19 @@ bool AC_DroneShowManager::_create_show_directory()
     return true;
 }
 
+bool AC_DroneShowManager::_read_file_head(const char* path, uint8_t* buf, size_t length)
+{
+    const int fd = AP::FS().open(path, O_RDONLY);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    const ssize_t actually_read = AP::FS().read(fd, buf, length);
+    AP::FS().close(fd);
+    return actually_read == static_cast<ssize_t>(length);
+}
+
 bool AC_DroneShowManager::_read_file_into_memory(
     const char* path, size_t max_size, uint8_t** data, size_t* length
 )
@@ -197,6 +210,7 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     _invalidate_projected_wall_clock_time_at_takeoff();
     gdmb_show_free(&_gdmb_show);
     _gdmb_reference_valid = false;
+    memset(&_show_identity, 0, sizeof(_show_identity));
     if (_show_data)
     {
         free(_show_data);
@@ -208,6 +222,23 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         // Show file does not exist. This basically means that the operation
         // was successful.
         return true;
+    }
+
+    // A .gdmb larger than the spec's cap is refused before anything is
+    // allocated for it; only its magic is read
+    if (static_cast<uint64_t>(stat_data.st_size) > GDMB_MAX_FILE_SIZE)
+    {
+        uint8_t magic[4];
+        if (
+            _read_file_head(SHOW_FILE, magic, sizeof(magic)) &&
+            gdmb_detect_show_file_format(magic, sizeof(magic)) == GDMB_SHOW_FILE_GDMB
+        ) {
+            gcs().send_text(
+                MAV_SEVERITY_ERROR, "Show rejected: E_SIZE (%ld bytes, cap %u)",
+                static_cast<long int>(stat_data.st_size), static_cast<unsigned>(GDMB_MAX_FILE_SIZE)
+            );
+            return false;
+        }
     }
 
     if (!_read_file_into_memory(SHOW_FILE, SIZE_MAX, &show_data, &show_length))
@@ -337,6 +368,15 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     
     if (success)
     {
+        // Remember which file this is: both formats carry their CRC in the
+        // header (.gdmb at offset 8, .skyb v2 at offset 6)
+        _show_identity.format = is_gdmb_show_loaded() ? ShowFileFormat_Gdmb : ShowFileFormat_Skyb;
+        _show_identity.size = show_length;
+        _show_identity.header_crc32 = is_gdmb_show_loaded()
+            ? UINT32_VALUE(show_data[11], show_data[10], show_data[9], show_data[8])
+            : UINT32_VALUE(show_data[9], show_data[8], show_data[7], show_data[6]);
+        _show_identity.file_crc32 = gdmb_crc32(0, show_data, show_length);
+
         // move ownership of the show data to the class member
         _show_data = show_data;
         show_data = nullptr;
