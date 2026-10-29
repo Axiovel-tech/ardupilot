@@ -36,6 +36,11 @@ AC_DroneShowManager::AC_DroneShowManager() :
 #endif
     _init_ok(false),
     _show_data(0),
+    _gdmb_reference_valid(false),
+    _show_identity(),
+    _was_armed(false),
+    _guided_command_warnings_sent(0),
+    _accel_ff_clipped(false),
     _projected_wall_clock_time_at_takeoff_sec(NAN),
     _start_time_requested_by(StartTimeSource::NONE),
     _start_time_on_internal_clock_usec(0),
@@ -54,6 +59,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     bool ok = true;
 
     AP_Param::setup_object_defaults(this, var_info);
+
+    gdmb_show_init(&_gdmb_show);
     
     ok &= (sb_trajectory_stats_init(&_trajectory_stats) == SB_SUCCESS);
     ok &= (sb_screenplay_init(&_screenplay) == SB_SUCCESS);
@@ -74,6 +81,7 @@ AC_DroneShowManager::~AC_DroneShowManager()
     }
 
     sb_show_controller_destroy(&_show_controller);
+    gdmb_show_free(&_gdmb_show);
     SB_DECREF_STATIC(&_main_show_scene);
     sb_screenplay_destroy(&_screenplay);
     sb_trajectory_stats_destroy(&_trajectory_stats);
@@ -104,6 +112,8 @@ void AC_DroneShowManager::init(const AC_WPNav* wp_nav)
     _params.start_time_gps_sec.set(-1);
     _params.start_time_gps_msec_offset.set(0);
     _params.authorization.set(DroneShowAuthorization_Revoked);
+    // SHOW_SLOT_VER describes this firmware, whatever was stored before
+    _params.slot_version.set(SHOW_SLOT_VERSION);
 
     _load_show_file_from_storage();
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
@@ -195,7 +205,10 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
     const uint8_t POSITION_WARNING = 1;
     const uint8_t VELOCITY_WARNING = 2;
     const uint8_t YAW_WARNING = 4;
-    static uint8_t warnings_sent = 0;
+    const uint8_t ACCELERATION_WARNING = 8;
+    const uint8_t ACCELERATION_CLIPPED_WARNING = 16;
+    // Each warning is sent once per show flown; see notify_drone_show_mode_entered_stage()
+    uint8_t& warnings_sent = _guided_command_warnings_sent;
     // static uint8_t counter = 0;
 
     float elapsed = get_elapsed_time_since_start_sec();
@@ -204,6 +217,7 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
     
     command.clear();
     command.yaw_cd = default_yaw_cd;
+    _accel_ff_clipped = false;
 
     if (!get_desired_global_position_at_seconds(elapsed, loc))
     {
@@ -278,6 +292,77 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
             }
         }
 
+        if (is_acceleration_control_enabled())
+        {
+            if (!get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(elapsed, command.acc))
+            {
+                command.acc.zero();
+            }
+
+            command.acc *= get_acceleration_feedforward_gain();
+
+            // Validate before bounding. Constraining a non-finite value would
+            // turn it into a finite one -- an infinite Z would clamp to the
+            // full envelope instead of being rejected.
+            if (command.acc.is_nan() || command.acc.is_inf())
+            {
+                if (!(warnings_sent & ACCELERATION_WARNING))
+                {
+                    gcs().send_text(MAV_SEVERITY_WARNING, "Invalid acceleration command; using zero");
+                    warnings_sent |= ACCELERATION_WARNING;
+                }
+                command.acc.zero();
+            }
+
+            // Guided mode configures both the shaping limit and the correction
+            // limit from WPNAV_ACCEL, so feed-forward and the corrective term
+            // share a single acceleration envelope. Bounding feed-forward to
+            // the whole envelope would let the trajectory consume all of it and
+            // leave the position controller nothing to correct with. Reserve a
+            // fraction for correction instead.
+            if (_wp_nav) {
+                const float envelope_fraction = constrain_float(
+                    get_acceleration_feedforward_max_fraction(), 0.0f, 1.0f
+                );
+                // The show command remains in the manager's legacy NEU cm/s/s
+                // convention. ArduPilot 4.7 renamed the WPNAV accessors and
+                // exposes both metre and centimetre variants, so use the
+                // centimetre variants explicitly here.
+                const float max_accel_xy = _wp_nav->get_wp_acceleration_cmss() * envelope_fraction;
+                const float max_accel_z = _wp_nav->get_accel_D_cmss() * envelope_fraction;
+
+                Vector2f accel_xy = command.acc.xy();
+                const bool clipped_xy = accel_xy.limit_length(max_accel_xy);
+                command.acc.x = accel_xy.x;
+                command.acc.y = accel_xy.y;
+
+                const float unclipped_z = command.acc.z;
+                command.acc.z = constrain_float(command.acc.z, -max_accel_z, max_accel_z);
+
+                // Silent truncation would look identical to a well-tracked show
+                // in the logs, so make the first occurrence visible. The show
+                // trajectory is meant to be audited against this envelope
+                // before flight; clipping here means that audit was wrong.
+                // SHRF records every clipped command so that clipping can be audited
+                _accel_ff_clipped = clipped_xy || !is_equal(unclipped_z, command.acc.z);
+                if (_accel_ff_clipped &&
+                    !(warnings_sent & ACCELERATION_CLIPPED_WARNING))
+                {
+                    gcs().send_text(
+                        MAV_SEVERITY_WARNING,
+                        "Show accel FF clipped to %.0f%% of WPNAV envelope",
+                        static_cast<double>(envelope_fraction * 100)
+                    );
+                    warnings_sent |= ACCELERATION_CLIPPED_WARNING;
+                }
+            } else {
+                // Without the WPNAV envelope there is nothing to bound the
+                // feed-forward against, so send none rather than send it
+                // unbounded.
+                command.acc.zero();
+            }
+        }
+
         // Prevent the drone from temporarily sinking below the takeoff altitude
         // if the "real" trajectory has a slow takeoff
         if (altitude_locked_above_takeoff_altitude) {
@@ -322,6 +407,12 @@ bool AC_DroneShowManager::get_current_guided_mode_command_to_send(
             return false;
         }
 
+#if HAL_LOGGING_ENABLED
+        if (_has_option(DroneShowOption_LogShowReference)) {
+            write_show_reference_log_message(elapsed);
+        }
+#endif
+
         return true;
     }
     else
@@ -345,6 +436,14 @@ const sb_control_output_t* AC_DroneShowManager::_get_raw_show_control_output_at_
 
 bool AC_DroneShowManager::get_desired_global_position_at_seconds(float time, Location& loc)
 {
+    GdmbReference ref;
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        const sb_vector3_t position_mm { ref.pos_m.x * 1000.0f, ref.pos_m.y * 1000.0f, ref.pos_m.z * 1000.0f };
+        _show_coordinate_system.convert_show_to_global_coordinate(position_mm, loc);
+        return true;
+    }
+
     const sb_control_output_t* output = _get_raw_show_control_output_at_seconds(time);
     sb_vector3_t position;
 
@@ -363,8 +462,15 @@ bool AC_DroneShowManager::get_desired_velocity_neu_in_cms_per_seconds_at_seconds
     sb_vector3_t vec;
     float vel_north, vel_east;
     float orientation_rad = _show_coordinate_system.orientation_rad;
+    GdmbReference ref;
 
-    if (!output || !sb_control_output_get_velocity_if_set(output, &vec))
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        vec.x = ref.vel_ms.x * 1000.0f;   // [m/s] -> [mm/s]
+        vec.y = ref.vel_ms.y * 1000.0f;
+        vec.z = ref.vel_ms.z * 1000.0f;
+    }
+    else if (!output || !sb_control_output_get_velocity_if_set(output, &vec))
     {
         return false;
     }
@@ -383,11 +489,87 @@ bool AC_DroneShowManager::get_desired_velocity_neu_in_cms_per_seconds_at_seconds
     return true;
 }
 
+bool AC_DroneShowManager::get_desired_acceleration_neu_in_cms_per_seconds_squared_at_seconds(float time, Vector3f& acc)
+{
+    const float orientation_rad = _show_coordinate_system.orientation_rad;
+    GdmbReference ref;
+
+    if (_get_gdmb_reference_at_seconds(time, ref)) {
+        // Analytic acceleration of the .gdmb curve, already in wall-clock time
+        acc.x = (cosf(orientation_rad) * ref.acc_mss.x + sinf(orientation_rad) * ref.acc_mss.y) * 100.0f;
+        acc.y = (sinf(orientation_rad) * ref.acc_mss.x - cosf(orientation_rad) * ref.acc_mss.y) * 100.0f;
+        acc.z = ref.acc_mss.z * 100.0f;
+        return true;
+    }
+
+    // Keep the show controller and its output-time metadata synchronized with
+    // the requested wall-clock instant.
+    if (!_get_raw_show_control_output_at_seconds(time)) {
+        return false;
+    }
+
+    sb_trajectory_player_t* player = _show_controller.trajectory_player;
+    sb_screenplay_scene_t* scene = sb_show_controller_get_current_scene(&_show_controller);
+    if (!player || !scene) {
+        return false;
+    }
+
+    const sb_control_output_time_t output_time =
+        sb_show_controller_get_current_output_time(&_show_controller);
+    sb_time_axis_t* time_axis = sb_screenplay_scene_get_time_axis(scene);
+    sb_vector3_with_yaw_t accel_vec;
+    sb_vector3_with_yaw_t velocity_vec;
+    float warped_rate = 1.0f;
+    float rate_derivative = 0.0f;
+
+    if (
+        !time_axis ||
+        sb_trajectory_player_get_acceleration_at(
+            player, output_time.warped_time_in_scene_sec, &accel_vec
+        ) != SB_SUCCESS ||
+        sb_trajectory_player_get_velocity_at(
+            player, output_time.warped_time_in_scene_sec, &velocity_vec
+        ) != SB_SUCCESS
+    ) {
+        return false;
+    }
+
+    _get_time_axis_rate_and_derivative(
+        scene, static_cast<int32_t>(output_time.time_msec), warped_rate, rate_derivative
+    );
+
+    // Chain rule for p(tau(t)):
+    //   d2p/dt2 = p''(tau) * tau_dot^2 + p'(tau) * tau_ddot
+    const float rate_squared = sq(warped_rate);
+    accel_vec.x = accel_vec.x * rate_squared + velocity_vec.x * rate_derivative;
+    accel_vec.y = accel_vec.y * rate_squared + velocity_vec.y * rate_derivative;
+    accel_vec.z = accel_vec.z * rate_squared + velocity_vec.z * rate_derivative;
+
+    const float acc_north = cosf(orientation_rad) * accel_vec.x + sinf(orientation_rad) * accel_vec.y;
+    const float acc_east = sinf(orientation_rad) * accel_vec.x - cosf(orientation_rad) * accel_vec.y;
+
+    // Show trajectory units are mm/s/s; Guided expects cm/s/s.
+    acc.x = acc_north / 10.0f;
+    acc.y = acc_east / 10.0f;
+    acc.z = accel_vec.z / 10.0f;
+    return true;
+}
+
 bool AC_DroneShowManager::get_desired_yaw_cd_and_yaw_rate_cd_s_at_seconds(float time, float& yaw_cd, float& yaw_rate_cd_s)
 {
     const sb_control_output_t* output = _get_raw_show_control_output_at_seconds(time);
     float yaw_deg;
     float yaw_rate_deg_s;
+    GdmbReference ref;
+
+    if (_get_gdmb_reference_at_seconds(time, ref))
+    {
+        // .gdmb yaw is clockwise-positive from the show X axis, like .skyc
+        // (AxioStack#89 decision 2), only in unwrapped radians
+        yaw_cd = wrap_360_cd(_show_coordinate_system.convert_show_to_global_yaw_and_scale_to_cd(degrees(ref.yaw_rad)));
+        yaw_rate_cd_s = degrees(ref.yaw_rate_rads) * 100.0f;
+        return true;
+    }
     
     if (
         !output ||
@@ -441,6 +623,12 @@ void AC_DroneShowManager::notify_drone_show_mode_entered_stage(DroneShowModeStag
 
     _stage_in_drone_show_mode = stage;
 
+    // The .gdmb reference belongs to the performance; do not keep logging the
+    // last one in the landing, loiter or error stages
+    if (stage != DroneShow_Performing) {
+        _gdmb_reference_valid = false;
+    }
+
     // Force-update preflight checks so we see the errors immediately if we
     // switched to the "waiting for start time" stage
     _update_preflight_check_result(/* force = */ true);
@@ -450,6 +638,9 @@ void AC_DroneShowManager::notify_drone_show_mode_entered_stage(DroneShowModeStag
     // when we receive it)
     if (stage == DroneShow_Takeoff) {
         write_screenplay_log_messages();
+
+        // Warnings about the guided mode commands are sent once per show
+        _guided_command_warnings_sent = 0;
     }
 }
 
@@ -459,6 +650,7 @@ void AC_DroneShowManager::notify_drone_show_mode_exited()
     _update_rgb_led_instance();
     _clear_start_time_if_set_by_switch();
     _last_setpoint.clear();
+    _gdmb_reference_valid = false;
 }
 
 void AC_DroneShowManager::notify_guided_mode_command_sent(const GuidedModeCommand& command)
@@ -536,6 +728,14 @@ bool AC_DroneShowManager::set_scheduled_start_time_in_gps_time_of_week(
 void AC_DroneShowManager::update()
 {
     static bool main_cycle = true;
+
+    // Record which show is loaded at every arming; dataflash logs start at
+    // arming, so every flight log carries it
+    const bool armed = AP::motors() && AP::motors()->armed();
+    if (armed && !_was_armed) {
+        _announce_show_identity_at_arming();
+    }
+    _was_armed = armed;
 
     // AXIOVEL fork (rtls-link-zephyr#120): evaluate the show lights on every
     // tick (50 Hz) instead of on alternating ticks (25 Hz) so that light

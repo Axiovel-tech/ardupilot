@@ -549,6 +549,12 @@ bool AC_DroneShowManager::_handle_time_axis_configuration_packet(void* data, uin
             sb_rth_plan_t* rth_plan = sb_screenplay_get_rth_plan(&new_screenplay);
             sb_rth_plan_entry_t rth_plan_entry;
             float rth_start_time = static_cast<float>(scene_header->scene_id & 0x3FFF);
+            if (is_gdmb_show_loaded()) {
+                // A .gdmb show has no .skyb RTH plan; its own certified RTH
+                // paths are executed in a later phase
+                gcs().send_text(MAV_SEVERITY_ERROR, "Collective RTH refused: not supported for .gdmb shows");
+                goto exit;
+            }
             if (rth_plan == nullptr || sb_rth_plan_evaluate_at(rth_plan, rth_start_time, &rth_plan_entry) != SB_SUCCESS) {
                 // Could not evaluate RTH plan at the given time
                 goto exit;

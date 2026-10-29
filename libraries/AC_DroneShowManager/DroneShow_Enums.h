@@ -23,7 +23,10 @@ enum DroneShowModeStage {
 // Enum representing the flags in the control mode bitmap
 enum DroneShowControlModeFlag {
     DroneShowControl_VelocityControlEnabled = 1,
-    DroneShowControl_AccelerationControlEnabledNotImplementedAnyMore = 2,
+    DroneShowControl_AccelerationControlEnabled = 2,
+    // .gdmb shows send acceleration feed-forward unless this bit is set; bit 1
+    // above only applies to .skyb shows
+    DroneShowControl_GdmbAccelerationFeedForwardDisabled = 4,
 };
 
 // Enum representing the authorization scopes for the start of the show
@@ -110,6 +113,16 @@ enum DroneShowOptionFlag {
     DroneShowOption_DisableFailsafeLights = 1,
     DroneShowOption_CorrectLandingPositionForCircularTrajectories = 2,
     DroneShowOption_PreventMotorOutput = 4,
+    // Log SHRF (show reference against estimated position) with every guided
+    // mode command; about 12 MB per hour at SHOW_CTRL_RATE = 50
+    DroneShowOption_LogShowReference = 8,
+};
+
+// Format of the loaded show file, as logged in SHID
+enum ShowFileFormat : uint8_t {
+    ShowFileFormat_None = 0,
+    ShowFileFormat_Skyb = 1,
+    ShowFileFormat_Gdmb = 2,
 };
 
 // Enum representing the telemetry profiles supported by the parameter set
