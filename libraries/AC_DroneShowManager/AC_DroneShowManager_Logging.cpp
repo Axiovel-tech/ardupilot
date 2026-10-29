@@ -158,3 +158,31 @@ void AC_DroneShowManager::write_screenplay_log_messages()
         }
     }
 }
+
+void AC_DroneShowManager::write_show_clock_log_message(uint64_t show_time_usec, bool accepted) const
+{
+    const struct log_ShowClock pkt {
+        LOG_PACKET_HEADER_INIT(LOG_SHOW_CLOCK_MSG),
+        time_us      : AP_HAL::micros64(),
+        show_time_us : show_time_usec,
+        offset_us    : _show_clock.offset_usec(),
+        samples      : _show_clock.sample_count(),
+        accepted     : accepted,
+    };
+
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}
+
+void AC_DroneShowManager::write_show_clock_commit_log_message() const
+{
+    const struct log_ShowClockCommit pkt {
+        LOG_PACKET_HEADER_INIT(LOG_SHOW_CLOCK_COMMIT_MSG),
+        time_us        : AP_HAL::micros64(),
+        start_show_us  : _start_time_on_show_clock_usec,
+        start_local_us : _start_time_on_internal_clock_usec,
+        offset_us      : _show_clock.offset_usec(),
+        clock_valid    : _show_clock.is_valid(),
+    };
+
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}

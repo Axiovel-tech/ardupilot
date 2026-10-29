@@ -336,7 +336,8 @@ bool AC_DroneShowManager::_handle_show_clock_packet(void* data, uint8_t length)
     }
 
     const CustomPackets::axio_show_clock_t* show_clock = static_cast<CustomPackets::axio_show_clock_t*>(data);
-    _show_clock.handle_sample(show_clock->gps_time_usec, AP_HAL::micros64());
+    const bool accepted = _show_clock.handle_sample(show_clock->gps_time_usec, AP_HAL::micros64());
+    write_show_clock_log_message(show_clock->gps_time_usec, accepted);
 
     return true;
 }

@@ -7,7 +7,9 @@
     LOG_FENCE_STATUS_MSG, \
     LOG_DRONE_SHOW_EVENT_MSG, \
     LOG_SCREENPLAY_ENTRY_MSG, \
-    LOG_CRTH_TRIGGER_MSG
+    LOG_CRTH_TRIGGER_MSG, \
+    LOG_SHOW_CLOCK_MSG, \
+    LOG_SHOW_CLOCK_COMMIT_MSG
 
 // @LoggerMessage: SHOW
 // @Description: Drone show mode information
@@ -126,6 +128,38 @@ struct PACKED log_CollectiveRTHTrigger {
     float start_z;
 };
 
+// @LoggerMessage: SCLK
+// @Description: Show clock sample received from the positioning tag
+// @Field: TimeUS: Time since system startup
+// @Field: Show: Show clock time in the sample, microseconds since the GPS epoch
+// @Field: Off: Internal clock minus show clock after the sample
+// @Field: N: Number of samples in the filter window
+// @Field: Acc: Whether the sample was accepted (0: ignored as an outlier)
+struct PACKED log_ShowClock {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint64_t show_time_us;
+    int64_t offset_us;
+    uint8_t samples;
+    uint8_t accepted;
+};
+
+// @LoggerMessage: SCOM
+// @Description: Show start committed on the internal clock
+// @Field: TimeUS: Time since system startup
+// @Field: Start: Start time on the show clock, microseconds since the GPS epoch
+// @Field: LStart: Start time on the internal clock
+// @Field: Off: Internal clock minus show clock used for the commit
+// @Field: Valid: Whether the show clock was valid at the commit
+struct PACKED log_ShowClockCommit {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint64_t start_show_us;
+    uint64_t start_local_us;
+    int64_t offset_us;
+    uint8_t clock_valid;
+};
+
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
     { LOG_DRONE_SHOW_MSG, sizeof(log_DroneShowStatus),                  \
       "SHOW", "QiBBifffBBBff", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDist,VDist", "ss--smmm---mm", "FC--C--------" }, \
@@ -136,4 +170,8 @@ struct PACKED log_CollectiveRTHTrigger {
     { LOG_SCREENPLAY_ENTRY_MSG, sizeof(log_ScreenplayEntry),             \
       "SBSP", "QBBBQIff", "TimeUS,Seq,Scene,Index,Origin,Duration,IR,FR", "s---ss--", "F---CC--" }, \
     { LOG_CRTH_TRIGGER_MSG, sizeof(log_CollectiveRTHTrigger),            \
-      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }
+      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }, \
+    { LOG_SHOW_CLOCK_MSG, sizeof(log_ShowClock),                         \
+      "SCLK", "QQqBB", "TimeUS,Show,Off,N,Acc", "sss--", "FFF--" }, \
+    { LOG_SHOW_CLOCK_COMMIT_MSG, sizeof(log_ShowClockCommit),            \
+      "SCOM", "QQQqB", "TimeUS,Start,LStart,Off,Valid", "ssss-", "FFFF-" }

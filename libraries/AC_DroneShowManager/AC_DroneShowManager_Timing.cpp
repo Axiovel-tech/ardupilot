@@ -193,6 +193,9 @@ void AC_DroneShowManager::_set_start_time_on_show_clock(uint32_t time_of_week_ms
     _start_time_on_show_clock_usec = start_usec;
     _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(start_usec);
     _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
+    if (_start_time_on_show_clock_committed) {
+        write_show_clock_commit_log_message();
+    }
 }
 
 void AC_DroneShowManager::_update_start_time_from_show_clock()
@@ -210,35 +213,70 @@ void AC_DroneShowManager::_update_start_time_from_show_clock()
     }
 
     _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
+    if (_start_time_on_show_clock_committed) {
+        write_show_clock_commit_log_message();
+    }
 }
 
 AC_DroneShowManager::ShowClock::ShowClock() :
-    _jitter_correction(MAX_LAG_MSEC, FILTER_WINDOW_SAMPLES),
-    _last_sample_at_msec(0),
-    _has_sample(false)
+    _window(),
+    _count(0),
+    _next(0),
+    _offset_usec(0),
+    _step_offset_usec(0),
+    _step_count(0),
+    _last_sample_at_msec(0)
 {
 }
 
-void AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
+bool AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
 {
-    _jitter_correction.correct_offboard_timestamp_usec(show_time_usec, local_usec);
+    const int64_t offset_usec = int64_t(local_usec) - int64_t(show_time_usec);
+
+    if (_count > 0 && offset_usec < _offset_usec - MAX_AHEAD_USEC) {
+        const int64_t step_spread_usec = offset_usec - _step_offset_usec;
+        if (_step_count > 0 && step_spread_usec <= STEP_AGREE_USEC && step_spread_usec >= -STEP_AGREE_USEC) {
+            _step_count++;
+        } else {
+            _step_offset_usec = offset_usec;
+            _step_count = 1;
+        }
+        if (_step_count < STEP_CONFIRM_SAMPLES) {
+            return false;
+        }
+        _count = 0;
+        _next = 0;
+    }
+    _step_count = 0;
+
+    _window[_next] = offset_usec;
+    _next = (_next + 1) % WINDOW_SAMPLES;
+    if (_count < WINDOW_SAMPLES) {
+        _count++;
+    }
+
+    _offset_usec = _window[0];
+    for (uint8_t i = 1; i < _count; i++) {
+        _offset_usec = MIN(_offset_usec, _window[i]);
+    }
+
     _last_sample_at_msec = AP_HAL::millis();
-    _has_sample = true;
+    return true;
 }
 
 bool AC_DroneShowManager::ShowClock::is_valid() const
 {
-    return _has_sample && AP_HAL::millis() - _last_sample_at_msec < TIMEOUT_MSEC;
+    return _count >= MIN_VALID_SAMPLES && AP_HAL::millis() - _last_sample_at_msec < TIMEOUT_MSEC;
 }
 
 uint64_t AC_DroneShowManager::ShowClock::local_to_show_usec(uint64_t local_usec) const
 {
-    return local_usec - _jitter_correction.get_link_offset_usec();
+    return local_usec - _offset_usec;
 }
 
 uint64_t AC_DroneShowManager::ShowClock::show_to_local_usec(uint64_t show_usec) const
 {
-    return show_usec + _jitter_correction.get_link_offset_usec();
+    return show_usec + _offset_usec;
 }
 
 bool AC_DroneShowManager::_is_safe_to_change_start_time_in_current_stage() const {

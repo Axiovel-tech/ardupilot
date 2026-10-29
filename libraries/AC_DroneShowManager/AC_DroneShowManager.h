@@ -8,7 +8,6 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_Notify/RGBLed.h>
 #include <AP_Param/AP_Param.h>
-#include <AP_RTC/JitterCorrection.h>
 
 #include <AC_BubbleFence/AC_BubbleFence.h>
 #include <AC_HardFence/AC_HardFence.h>
@@ -107,20 +106,37 @@ private:
     public:
         ShowClock();
 
-        void handle_sample(uint64_t show_time_usec, uint64_t local_usec);
+        // Returns whether the sample was accepted
+        bool handle_sample(uint64_t show_time_usec, uint64_t local_usec);
         bool is_valid() const;
         uint64_t local_to_show_usec(uint64_t local_usec) const;
         uint64_t show_to_local_usec(uint64_t show_usec) const;
 
+        // Internal clock minus show clock, from the lowest-latency sample
+        int64_t offset_usec() const { return _offset_usec; }
+        uint8_t sample_count() const { return _count; }
+
     private:
         // The tag sends samples at about 10 Hz, so 20 samples span ~2 s
-        static constexpr uint16_t FILTER_WINDOW_SAMPLES = 20;
-        static constexpr uint16_t MAX_LAG_MSEC = 500;
+        static constexpr uint8_t WINDOW_SAMPLES = 20;
+        static constexpr uint8_t MIN_VALID_SAMPLES = 5;
         static constexpr uint32_t TIMEOUT_MSEC = 2000;
 
-        JitterCorrection _jitter_correction;
+        // A sample implying this much less latency than the current estimate
+        // cannot be explained by transport jitter; it is ignored unless
+        // STEP_CONFIRM_SAMPLES consecutive samples agree on it within
+        // STEP_AGREE_USEC (a genuine step of the show clock, e.g. a re-pin)
+        static constexpr int64_t MAX_AHEAD_USEC = 20000;
+        static constexpr uint8_t STEP_CONFIRM_SAMPLES = 3;
+        static constexpr int64_t STEP_AGREE_USEC = 5000;
+
+        int64_t _window[WINDOW_SAMPLES];
+        uint8_t _count;
+        uint8_t _next;
+        int64_t _offset_usec;
+        int64_t _step_offset_usec;
+        uint8_t _step_count;
         uint32_t _last_sample_at_msec;
-        bool _has_sample;
     };
 
 public:
@@ -570,6 +586,12 @@ public:
     
     // Writes a message containing the trigger of a collective RTL maneuver into the log
     void write_crth_trigger_log_message(float rth_start_time_sec, sb_vector3_t start) const;
+
+    // Writes a show clock sample and the resulting mapping into the log
+    void write_show_clock_log_message(uint64_t show_time_usec, bool accepted) const;
+
+    // Writes the start committed on the internal clock into the log
+    void write_show_clock_commit_log_message() const;
     
     // Writes a message containing a summary of the gefence status into the log
     void write_fence_status_log_message() const;
