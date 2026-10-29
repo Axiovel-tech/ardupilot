@@ -165,6 +165,7 @@ const char* gdmb_error_name(gdmb_error_t code)
     case GDMB_E_CONTINUITY: return "E_CONTINUITY";
     case GDMB_E_C2: return "E_C2";
     case GDMB_E_REGIME: return "E_REGIME";
+    case GDMB_E_REST: return "E_REST";
     case GDMB_E_NOMEM: return "E_NOMEM";
     case GDMB_E_INVALID: return "E_INVALID";
     }
@@ -1321,6 +1322,37 @@ static gdmb_error_t parse_structure(const uint8_t* data, uint32_t size, uint32_t
     return GDMB_OK;
 }
 
+/* §7.1 E_REST: the FLAT segment at one end of the timeline is at rest there,
+ * within the one-sided §7.3 tolerances (what rounding alone can leave, plus
+ * the slack): |v| per axis and |yaw rate|, and |a| per position axis. */
+static bool at_rest(const uint8_t* data, const gdmb_segment_t* seg, bool at_end)
+{
+    const gdmb_real_t T = (gdmb_real_t)seg->dur_us / US_PER_SEC;
+    int k;
+
+    for (k = 0; k < 4; k++) {
+        int64_t c[8];
+        gdmb_real_t v, a, tol_v, tol_a;
+        const bool is_yaw = (k == 3);
+        const gdmb_real_t q = is_yaw ? GDMB_R(1, YAW_SCALE) : GDMB_R(1, POS_SCALE);
+        const int n = load_axis(data, seg->offset, seg->deg, k, seg->p0[k], c);
+
+        endpoint_derivs(c, n, T, q, at_end, &v, &a);
+        tol_v = q * (gdmb_real_t)n / T + GDMB_R(1, 1000);
+        if (fabs(v) > tol_v) {
+            return false;
+        }
+        if (!is_yaw) {
+            tol_a = 2 * q * (gdmb_real_t)(n * (n - 1)) / (T * T) + GDMB_R(1, 100);
+            if (fabs(a) > tol_a) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 /* Pass 2: timeline index, continuity, C² and regime joints */
 static gdmb_error_t parse_timeline(gdmb_show_t* show, gdmb_diag_t* diag)
 {
@@ -1449,6 +1481,14 @@ static gdmb_error_t parse_timeline(gdmb_show_t* show, gdmb_diag_t* diag)
     show->start_sigma = show->segments[0].sigma;
     show->end_sigma = show->segments[n - 1].sigma;
 
+    /* E_REST: v, a and yaw rate are at rest at both ends of the timeline */
+    if (!at_rest(data, &show->segments[0], false)) {
+        FAIL(diag, GDMB_E_REST, show->segments[0].offset, "not at rest at the start of the timeline");
+    }
+    if (!at_rest(data, &show->segments[n - 1], true)) {
+        FAIL(diag, GDMB_E_REST, show->segments[n - 1].offset, "not at rest at the end of the timeline");
+    }
+
     return GDMB_OK;
 }
 
@@ -1559,8 +1599,8 @@ static gdmb_error_t parse(gdmb_show_t* show, const uint8_t* data, size_t size, u
     }
 
     caps = rd_u32(data + 44);
-    if (caps & ~(GDMB_CAP_REVERSIBLE_THRUST | GDMB_CAP_HIGH_TILT |
-                 (provisional ? GDMB_CAP_MANEUVER : 0u))) {
+    /* high_tilt (bit 2) is reserved in v1; maneuver (bit 0) is provisional */
+    if (caps & ~(GDMB_CAP_REVERSIBLE_THRUST | (provisional ? GDMB_CAP_MANEUVER : 0u))) {
         FAIL(diag, GDMB_E_CAPS, 44, "undefined capability bits set");
     }
     if (((caps & GDMB_CAP_MANEUVER) != 0) != ((features & GDMB_FEATURE_MANEUVER) != 0) ||

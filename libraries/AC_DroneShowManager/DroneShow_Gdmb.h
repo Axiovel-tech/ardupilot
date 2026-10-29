@@ -59,7 +59,7 @@ typedef double gdmb_real_t;
 /* Capability bits, header offset 44 (spec §4.3) */
 #define GDMB_CAP_MANEUVER 0x01u /* provisional (spec §4.11) */
 #define GDMB_CAP_REVERSIBLE_THRUST 0x02u
-#define GDMB_CAP_HIGH_TILT 0x04u
+#define GDMB_CAP_HIGH_TILT 0x04u /* reserved in v1 */
 
 /* Error codes; the names match the stable identifiers of spec §7.1 */
 typedef enum {
@@ -90,6 +90,7 @@ typedef enum {
     GDMB_E_CONTINUITY,
     GDMB_E_C2,
     GDMB_E_REGIME,
+    GDMB_E_REST,
     /* Not a format error: the reader could not allocate its index */
     GDMB_E_NOMEM,
     /* Not a format error: invalid argument (for example, no show loaded) */

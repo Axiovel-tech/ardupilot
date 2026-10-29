@@ -258,17 +258,17 @@ TEST(Gdmb, reject_and_accept_vectors)
         }
     }
 
-    EXPECT_EQ(31u, rejects);  // 20 v1 + 11 provisional
+    EXPECT_EQ(41u, rejects);  // 30 v1 + 11 provisional
     EXPECT_EQ(2u, accepts);   // skippable unknown block, header extension
 }
 
-// The E_SIZE recipe of edge/index.json: flat-single plus a skippable COMMENT
-// padded with spaces so the file is 262 145 bytes
+// The E_SIZE recipe of edge/index.json: flat-single plus a skippable block of
+// unknown type 0x20, padded so the file is 262 145 bytes (a single fault)
 TEST(Gdmb, reject_oversize)
 {
     std::vector<uint8_t> b(vectors[0].data, vectors[0].data + vectors[0].size);
     const uint32_t pad = GDMB_MAX_FILE_SIZE + 1 - b.size() - 6;
-    b.push_back(0x03);
+    b.push_back(0x20);
     b.push_back(0x01);
     for (int i = 0; i < 4; i++) {
         b.push_back((pad >> (8 * i)) & 0xFF);

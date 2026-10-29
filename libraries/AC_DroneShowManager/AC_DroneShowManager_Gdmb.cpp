@@ -68,6 +68,7 @@ bool AC_DroneShowManager::_load_gdmb_show_from_memory(uint8_t* data, size_t leng
     ) {
         refusal = "inverted (sigma -1) not supported";
     } else if (_gdmb_show.capabilities & GDMB_CAP_HIGH_TILT) {
+        // Unreachable while high_tilt is reserved in v1 (the reader refuses it)
         refusal = "high-tilt not supported";
     }
 
