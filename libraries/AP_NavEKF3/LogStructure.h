@@ -19,7 +19,8 @@
     LOG_XKV1_MSG, \
     LOG_XKV2_MSG, \
     LOG_XKY0_MSG, \
-    LOG_XKY1_MSG
+    LOG_XKY1_MSG, \
+    LOG_XKAV_MSG
 
 // @LoggerMessage: XKF0
 // @Description: EKF3 beacon sensor diagnostics
@@ -365,6 +366,28 @@ struct PACKED log_XKFS {
     uint8_t mag_fusion;
 };
 
+// @LoggerMessage: XKAV
+// @Description: EKF3 averaged accelerometers (EK3_ACC_AVG)
+// @Field: TimeUS: Time since system startup
+// @Field: C: EKF3 core this data is for
+// @Field: DX: filtered X accel of the second averaged IMU minus the first
+// @Field: DY: filtered Y accel of the second averaged IMU minus the first
+// @Field: DZ: filtered Z accel of the second averaged IMU minus the first
+// @Field: Solo: IMU standing in alone, offset by half the difference, while the other is faulted or fading back in; -1 when both are averaged
+// @Field: Fade: weight of the full average while an IMU fades back in
+// @Field: Flt: bitmask of averaged IMUs with a hard fault (unhealthy or clipping)
+struct PACKED log_XKAV {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t core;
+    float diff_x;
+    float diff_y;
+    float diff_z;
+    int8_t solo;
+    float fade;
+    uint8_t faulted;
+};
+
 // @LoggerMessage: XKTV
 // @Description: EKF3 Yaw Estimator States
 // @Field: TimeUS: Time since system startup
@@ -455,6 +478,8 @@ struct PACKED log_XKV {
       "XKT", "QBIffffffff", "TimeUS,C,Cnt,IMUMin,IMUMax,EKFMin,EKFMax,AngMin,AngMax,VMin,VMax", "s#sssssssss", "F-000000000", true }, \
     { LOG_XKTV_MSG, sizeof(log_XKTV),                         \
       "XKTV", "QBff", "TimeUS,C,TVS,TVD", "s#rr", "F-00", true }, \
+    { LOG_XKAV_MSG, sizeof(log_XKAV),                         \
+      "XKAV", "QBfffbfB", "TimeUS,C,DX,DY,DZ,Solo,Fade,Flt", "s#ooo---", "F-000---", true }, \
     { LOG_XKV1_MSG, sizeof(log_XKV), \
       "XKV1","QBffffffffffff","TimeUS,C,V00,V01,V02,V03,V04,V05,V06,V07,V08,V09,V10,V11", "s#------------", "F-------------" , true }, \
     { LOG_XKV2_MSG, sizeof(log_XKV), \
