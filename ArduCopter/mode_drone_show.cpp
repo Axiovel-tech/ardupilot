@@ -535,6 +535,17 @@ void ModeDroneShow::takeoff_start()
     // now that we are past the basic checks, we can commit ourselves to entering
     // takeoff mode
     _set_stage(DroneShow_Takeoff);
+
+    // a normal takeoff spools up the motors, ramps up the throttle until it
+    // lifts off and then climbs in the time that the takeoff time of the show
+    // allows for
+    const float margin_sec = 2.0f;
+    _takeoff_deadline_msec = 1000.0f * (
+        show_manager.get_motor_spool_up_time_sec() +
+        g2.takeoff_throttle_slew_time +
+        show_manager.get_planned_takeoff_climb_time_sec() +
+        margin_sec
+    );
     
     // early exit if the motor output is prevented
     if (show_manager.is_motor_output_disabled()) {
@@ -612,6 +623,15 @@ void ModeDroneShow::takeoff_run()
         } else if (takeoff_completed()) {
             // if the takeoff has finished, move to the next stage
             completed = true;
+        } else if (takeoff_overdue()) {
+            // joining the show later would mean a jump to a point of the
+            // trajectory that has moved on in the meantime
+            gcs().send_text(
+                MAV_SEVERITY_CRITICAL, "Takeoff stalled for %.1f s, landing in place",
+                static_cast<double>(_takeoff_deadline_msec * 0.001f)
+            );
+            AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::FAILED_TO_SET_DESTINATION);
+            landing_start();
         }
     }
 
@@ -660,48 +680,38 @@ bool ModeDroneShow::takeoff_completed() const
             int32_t desired_altitude_above_home_cm;
             AC_DroneShowManager* show_manager = &copter.g2.drone_show_manager;
 
-            if (
-                show_manager->get_current_location(loc) &&
-                loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, altitude_above_home_cm)
-            )
+            if (reached_takeoff_exit_altitude(altitude_above_home_cm))
             {
-                if (altitude_above_home_cm >= 0.7 * show_manager->get_takeoff_altitude_cm())
+                // Altitude above home seems high enough, but is the trajectory
+                // already ahead of us?
+                float elapsed = show_manager->get_elapsed_time_since_start_sec();
+                if (!show_manager->get_desired_global_position_at_seconds(elapsed, loc))
                 {
-                    // Altitude above home seems high enough, but is the trajectory
-                    // already ahead of us?
-                    float elapsed = show_manager->get_elapsed_time_since_start_sec();
-                    if (!show_manager->get_desired_global_position_at_seconds(elapsed, loc))
-                    {
-                        // Unable to get desired position, this should not happen
-                        return false;
-                    }
-                    else if (loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, desired_altitude_above_home_cm))
-                    {
-                        // If the desired target is above our current altitude,
-                        // we can go to the next stage, otherwise we wait until
-                        // it catches up.
-                        return desired_altitude_above_home_cm >= altitude_above_home_cm;
-                    }
-                    else
-                    {
-                        // This should not happen, especially because we've already been
-                        // through a successful call to loc.get_alt_cm() if we managed to get
-                        // here.
-                        return false;
-                    }
+                    // Unable to get desired position, this should not happen
+                    return false;
+                }
+                else if (loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, desired_altitude_above_home_cm))
+                {
+                    // If the desired target is above our current altitude,
+                    // we can go to the next stage, otherwise we wait until
+                    // it catches up.
+                    return desired_altitude_above_home_cm >= altitude_above_home_cm;
                 }
                 else
                 {
-                    // We are not above 70% of the takeoff altitude, so we continue
-                    // the takeoff procedure to rise higher.
+                    // This should not happen, especially because we've already been
+                    // through a successful call to loc.get_alt_cm() if we managed to get
+                    // here.
                     return false;
                 }
             }
             else
             {
-                // This should not happen; it usually means that we do not have an
-                // EKF origin yet. The safest is to return false so we do not
-                // proceed to the "performing" phase with this error.
+                // We are not above 70% of the takeoff altitude, so we continue
+                // the takeoff procedure to rise higher. This is also the case
+                // if we do not know our altitude, which usually means that we
+                // do not have an EKF origin yet; the safest is not to proceed
+                // to the "performing" phase then.
                 return false;
             }
         } else {
@@ -735,6 +745,36 @@ bool ModeDroneShow::takeoff_timed_out() const
     } else {
         return false;
     }
+}
+
+// returns whether the takeoff into the show is stuck below the altitude where
+// it may hand over to the show for longer than a normal takeoff could take.
+// A drone above that altitude may legitimately wait longer for the trajectory
+// if the show clock is slowed down or paused.
+bool ModeDroneShow::takeoff_overdue() const
+{
+    int32_t altitude_above_home_cm;
+
+    return (
+        _stage == DroneShow_Takeoff &&
+        _next_stage_after_takeoff == DroneShow_Performing &&
+        get_elapsed_time_since_last_stage_change_msec() > _takeoff_deadline_msec &&
+        !reached_takeoff_exit_altitude(altitude_above_home_cm)
+    );
+}
+
+// returns whether the drone has reached the altitude where the takeoff may
+// hand over to the show trajectory, and stores the current altitude above home
+bool ModeDroneShow::reached_takeoff_exit_altitude(int32_t& altitude_above_home_cm) const
+{
+    Location loc;
+    const AC_DroneShowManager& show_manager = copter.g2.drone_show_manager;
+
+    return (
+        show_manager.get_current_location(loc) &&
+        loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, altitude_above_home_cm) &&
+        altitude_above_home_cm >= 0.7 * show_manager.get_takeoff_altitude_cm()
+    );
 }
 
 // starts the phase where we are actually performing the show
