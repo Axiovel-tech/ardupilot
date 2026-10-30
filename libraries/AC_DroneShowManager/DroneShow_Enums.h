@@ -85,7 +85,19 @@ enum LightEffectPriority {
 // Time synchronization mode used when starting the show
 enum TimeSyncMode {
     TimeSyncMode_Countdown = 0, // Ignore SHOW_START_TIME and expect countdown messages from GCS
-    TimeSyncMode_GPS = 1 // Use SHOW_START_TIME and synchronize based on GPS time
+    TimeSyncMode_GPS = 1, // Use SHOW_START_TIME and synchronize based on GPS time
+    TimeSyncMode_ShowClock = 2 // Take the start from the Axio show schedule on the show clock, run the show on the internal clock
+};
+
+// What the drone did with a show schedule packet; logged in SSCH
+enum ShowScheduleAction : uint8_t {
+    ShowScheduleAction_Ignored = 0,         // the start is committed; only an abort is taken
+    ShowScheduleAction_Scheduled = 1,       // new or updated start
+    ShowScheduleAction_Cleared = 2,
+    ShowScheduleAction_Refused = 3,         // a new start less than the commit lead ahead
+    ShowScheduleAction_Aborted = 4,
+    ShowScheduleAction_NoClock = 5,         // new start while the show clock is invalid; waits for a re-send
+    ShowScheduleAction_TimebaseStep = 6,    // uncommitted start dropped on a show clock timebase step
 };
 
 // Possible actions to take at the end of the show

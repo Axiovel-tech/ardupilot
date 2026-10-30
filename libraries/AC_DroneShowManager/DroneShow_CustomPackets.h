@@ -21,10 +21,17 @@ namespace CustomPackets {
     static const uint8_t SIMPLE_GEOFENCE_SETUP = 3;
     static const uint8_t ACKNOWLEDGMENT = 4;
     static const uint8_t TIME_AXIS_CONFIG = 5;
+    static const uint8_t AXIO_SHOW_SCHEDULE = 0x42;
+    static const uint8_t AXIO_SHOW_CLOCK = 0x43;
 
     static const uint8_t DRONE_TO_GCS_STATUS = 0x5b;
     static const uint8_t GCS_TO_DRONE = 0x5c;
     static const uint8_t DRONE_TO_GCS = 0x5d;
+
+    // Axio drone-to-GCS packets carry their real type in the first payload
+    // byte like GCS_TO_DRONE; DRONE_TO_GCS carries acknowledgments without one
+    static const uint8_t AXIO_DRONE_TO_GCS = 0x5e;
+    static const uint8_t AXIO_SHOW_SCHEDULE_STATUS = 0x42;
 
     typedef struct PACKED {
         DRONE_SHOW_STATUS_BASIC_FIELDS;
@@ -72,6 +79,35 @@ namespace CustomPackets {
             uint16_t start_time_msec_offset;
         } v3_extended_part;
     } start_config_t;
+
+    typedef struct PACKED {
+        // UWB cluster clock sampled by the positioning tag just before
+        // transmission, in microseconds
+        uint64_t cluster_time_usec;
+    } axio_show_clock_t;
+
+    typedef struct PACKED {
+        // Changes whenever the operator sets, moves or clears the start; never 0
+        uint16_t schedule_id;
+        // Start of the show on the cluster clock, in microseconds; 0 clears the
+        // start, or aborts it once it is committed
+        uint64_t start_cluster_usec;
+        uint8_t flags;
+    } axio_show_schedule_t;
+
+    typedef struct PACKED {
+        uint8_t type;  // AXIO_SHOW_SCHEDULE_STATUS
+        uint16_t schedule_id;
+        uint8_t flags;  // AxioShowScheduleStatusFlags
+        uint64_t start_cluster_usec;
+    } axio_show_schedule_status_t;
+
+    enum AxioShowScheduleStatusFlags : uint8_t {
+        AXIO_SCHEDULE_HAS_START = 1 << 0,
+        AXIO_SCHEDULE_COMMITTED = 1 << 1,
+        AXIO_SCHEDULE_CLOCK_VALID = 1 << 2,
+        AXIO_SCHEDULE_SET_BY_RC = 1 << 3,
+    };
 
     typedef struct PACKED {
         // Number of points in the polygon geofence; zero means that the polygon

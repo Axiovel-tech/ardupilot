@@ -228,6 +228,16 @@ bool AC_DroneShowManager::_handle_custom_data_message(mavlink_channel_t chan, ui
         case CustomPackets::TIME_AXIS_CONFIG:
             handled = _handle_time_axis_configuration_packet(data, length);
             break;
+
+        // Show clock broadcast by the positioning tag on the flight controller link
+        case CustomPackets::AXIO_SHOW_CLOCK:
+            handled = _handle_show_clock_packet(data, length);
+            break;
+
+        // Show start scheduled by the ground on the show clock
+        case CustomPackets::AXIO_SHOW_SCHEDULE:
+            handled = _handle_show_schedule_packet(data, length);
+            break;
     }
 
     if (handled && needs_reply) {
@@ -324,6 +334,53 @@ bool AC_DroneShowManager::_handle_geofence_setup_packet(void* data, uint8_t leng
     return true;
 }
 
+bool AC_DroneShowManager::_handle_show_clock_packet(void* data, uint8_t length)
+{
+    if (length < sizeof(CustomPackets::axio_show_clock_t)) {
+        return false;
+    }
+
+    if (!uses_show_clock_for_show_start()) {
+        return true;
+    }
+
+    const CustomPackets::axio_show_clock_t* show_clock = static_cast<CustomPackets::axio_show_clock_t*>(data);
+    const ShowClock::SampleResult result = _show_clock.handle_sample(show_clock->cluster_time_usec, AP_HAL::micros64());
+    write_show_clock_log_message(show_clock->cluster_time_usec, result != ShowClock::SampleResult::IGNORED);
+
+    if (
+        result == ShowClock::SampleResult::TIMEBASE_STEP &&
+        _start_time_on_show_clock_usec > 0 &&
+        !_start_time_on_show_clock_committed &&
+        _is_safe_to_change_start_time_in_current_stage()
+    ) {
+        write_show_schedule_log_message(_show_schedule_id, _start_time_on_show_clock_usec, ShowScheduleAction_TimebaseStep);
+        _dropped_start_cluster_usec = _start_time_on_show_clock_usec;
+        clear_scheduled_start_time(/* force = */ true);
+    }
+
+    return true;
+}
+
+bool AC_DroneShowManager::_handle_show_schedule_packet(void* data, uint8_t length)
+{
+    if (length < sizeof(CustomPackets::axio_show_schedule_t)) {
+        return false;
+    }
+
+    if (!uses_show_clock_for_show_start()) {
+        return true;
+    }
+
+    const CustomPackets::axio_show_schedule_t* schedule = static_cast<CustomPackets::axio_show_schedule_t*>(data);
+    const uint16_t schedule_id = schedule->schedule_id;
+    const uint64_t start_cluster_usec = schedule->start_cluster_usec;
+    const ShowScheduleAction action = _apply_show_schedule(schedule_id, start_cluster_usec);
+    write_show_schedule_log_message(schedule_id, start_cluster_usec, action);
+
+    return true;
+}
+
 bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, uint8_t length)
 {
     if (length < offsetof(CustomPackets::start_config_t, v2_extended_part)) {
@@ -350,8 +407,11 @@ bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, ui
     // precision. The millisecond part is transmitted separately in the optional part
     // of the start time configuration packet, for backward compatibility reasons.
 
-    // Update start time expressed in GPS time of week
-    if (start_config->start_time < 0) {
+    // Update start time expressed in GPS time of week; with the show clock the
+    // start comes from the show schedule packet only
+    if (uses_show_clock_for_show_start()) {
+        // Do not change start time
+    } else if (start_config->start_time < 0) {
         // Clear start time
         set_scheduled_start_time_in_gps_time_of_week(-1, 0);
     } else if (start_config->start_time >= GPS_WEEK_LENGTH_SEC) {
@@ -393,7 +453,7 @@ bool AC_DroneShowManager::_handle_start_time_configuration_packet(void* data, ui
         // part exists and is positive, _and_ we are using the internal
         // clock to synchronize the start, then we update the start
         // time based on this
-        if (!uses_gps_time_for_show_start()) {
+        if (!uses_gps_time_for_show_start() && !uses_show_clock_for_show_start()) {
             int32_t countdown_msec = start_config->v2_extended_part.countdown_msec;
 
             if (countdown_msec == 0x7FFFFFFF) {
