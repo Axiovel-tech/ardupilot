@@ -69,6 +69,8 @@ bool AC_DroneShowManager::is_prepared_to_take_off() const
 
 bool AC_DroneShowManager::notify_takeoff_attempt()
 {
+    write_pad_check_log_message();
+
     if (
         _stage_in_drone_show_mode == DroneShow_WaitForStartTime && !_pad_check.has_samples &&
         (is_positive(_params.max_pad_speed_error_m_s) || is_positive(_params.max_pad_height_error_m))

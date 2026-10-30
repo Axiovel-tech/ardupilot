@@ -540,6 +540,9 @@ public:
     // Writes a message containing a summary of the gefence status into the log
     void write_fence_status_log_message() const;
 
+    // Writes a message containing the result of the last pad check into the log
+    void write_pad_check_log_message() const;
+
     // Writes a sequence of log messages containing a representation of the current time
     // axis
     void write_screenplay_log_messages();

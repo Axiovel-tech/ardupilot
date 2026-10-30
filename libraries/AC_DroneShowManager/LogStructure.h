@@ -7,7 +7,8 @@
     LOG_FENCE_STATUS_MSG, \
     LOG_DRONE_SHOW_EVENT_MSG, \
     LOG_SCREENPLAY_ENTRY_MSG, \
-    LOG_CRTH_TRIGGER_MSG
+    LOG_CRTH_TRIGGER_MSG, \
+    LOG_PAD_CHECK_MSG
 
 // @LoggerMessage: SHOW
 // @Description: Drone show mode information
@@ -126,6 +127,30 @@ struct PACKED log_CollectiveRTHTrigger {
     float start_z;
 };
 
+// @LoggerMessage: SPAD
+// @Description: Pad check at a show takeoff attempt, over the last second of waiting on the pad, for the EKF lane farthest from passing
+// @Field: TimeUS: Time since system startup
+// @Field: Lane: EKF lane that the other fields refer to
+// @Field: Spd: Speed of the mean estimated velocity
+// @Field: SpdMax: Largest estimated speed
+// @Field: DZ: Mean estimated height relative to the takeoff position
+// @Field: Fail: Failed parts of the check; bit 0: speed, bit 1: height
+// @Field: PIMU: Index of the IMU whose accelerometer the primary EKF lane uses
+// @Field: AMask: Bitmask of the usable accelerometers
+
+// pad check at takeoff attempts
+struct PACKED log_PadCheck {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t lane;
+    float speed;
+    float max_speed;
+    float height_error;
+    uint8_t failures;
+    uint8_t primary_imu;
+    uint8_t accel_mask;
+};
+
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
     { LOG_DRONE_SHOW_MSG, sizeof(log_DroneShowStatus),                  \
       "SHOW", "QiBBifffBBBff", "TimeUS,ClockMS,Stage,Scene,SceneMS,X,Y,Z,R,G,B,HDist,VDist", "ss--smmm---mm", "FC--C--------" }, \
@@ -136,4 +161,6 @@ struct PACKED log_CollectiveRTHTrigger {
     { LOG_SCREENPLAY_ENTRY_MSG, sizeof(log_ScreenplayEntry),             \
       "SBSP", "QBBBQIff", "TimeUS,Seq,Scene,Index,Origin,Duration,IR,FR", "s---ss--", "F---CC--" }, \
     { LOG_CRTH_TRIGGER_MSG, sizeof(log_CollectiveRTHTrigger),            \
-      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }
+      "CRTH", "QiIfff", "TimeUS,ClockMS,StartMS,StartX,StartY,StartZ", "sssmmm", "FCC---" }, \
+    { LOG_PAD_CHECK_MSG, sizeof(log_PadCheck),                           \
+      "SPAD", "QBfffBBB", "TimeUS,Lane,Spd,SpdMax,DZ,Fail,PIMU,AMask", "s-nnm---", "F-000---" }
