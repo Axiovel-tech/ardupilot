@@ -108,6 +108,31 @@ void NavEKF3_core::Log_Write_XKFS(uint64_t time_us) const
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }
 
+void NavEKF3_core::Log_Write_XKAV(uint64_t time_us) const
+{
+    if (!accelAvg.enabled) {
+        return;
+    }
+    uint8_t faulted = 0;
+    for (uint8_t i=0; i<2; i++) {
+        if (accelAvg.faulted & (1U<<i)) {
+            faulted |= 1U << accelAvg.imu[i];
+        }
+    }
+    const struct log_XKAV pkt {
+        LOG_PACKET_HEADER_INIT(LOG_XKAV_MSG),
+        time_us : time_us,
+        core    : DAL_CORE(core_index),
+        diff_x  : float(accelAvg.diff.x),
+        diff_y  : float(accelAvg.diff.y),
+        diff_z  : float(accelAvg.diff.z),
+        solo    : int8_t(accelAvg.solo < 0 ? -1 : accelAvg.imu[accelAvg.solo]),
+        fade    : float(accelAvg.fade),
+        faulted : faulted,
+    };
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}
+
 void NavEKF3_core::Log_Write_XKF3(uint64_t time_us) const
 {
     // Write third EKF packet
@@ -400,6 +425,7 @@ void NavEKF3_core::Log_Write(uint64_t time_us)
     Log_Write_XKF5(time_us);
 
     Log_Write_XKFS(time_us);
+    Log_Write_XKAV(time_us);
     Log_Write_Quaternion(time_us);
 
 
