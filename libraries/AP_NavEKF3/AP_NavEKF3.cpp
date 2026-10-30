@@ -1227,11 +1227,31 @@ bool NavEKF3::getPosD(postype_t &posD) const
     return core[primary].getPosD(posD);
 }
 
+// Write the last calculated D position of the specified instance relative to the reference point (m).
+// If a calculated solution is not available, use the best available data and return false
+bool NavEKF3::getPosD(int8_t instance, postype_t &posD) const
+{
+    if (!core) {
+        return false;
+    }
+    if (instance < 0 || instance >= num_cores) instance = primary;
+    return core[instance].getPosD(posD);
+}
+
 // return NED velocity in m/s
 void NavEKF3::getVelNED(Vector3f &vel) const
 {
     if (core) {
         core[primary].getVelNED(vel);
+    }
+}
+
+// return NED velocity of the specified instance in m/s
+void NavEKF3::getVelNED(int8_t instance, Vector3f &vel) const
+{
+    if (instance < 0 || instance >= num_cores) instance = primary;
+    if (core) {
+        core[instance].getVelNED(vel);
     }
 }
 

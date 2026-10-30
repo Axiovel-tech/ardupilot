@@ -10,6 +10,7 @@ import copy
 import math
 import os
 import shutil
+import struct
 import tempfile
 import time
 import numpy
@@ -13620,6 +13621,241 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.progress("Sprayer OK")
 
+    # drone show trajectory in the show frame (x north, y west, z up), as
+    # linear segments of (duration_s, x_m, y_m, z_m) from the takeoff position
+    DRONE_SHOW_TRAJECTORY = [
+        (5, 0, 0, 0),
+        (2, 0, 0, 2),
+        (5, 5, 0, 2),
+        (3, 5, 0, 2),
+        (5, 0, 0, 2),
+        (4, 0, 0, 0),
+    ]
+    DRONE_SHOW_MODE = 127
+    DRONE_SHOW_STAGE_WAIT_FOR_START_TIME = 2
+    DRONE_SHOW_STAGE_TAKEOFF = 3
+    DRONE_SHOW_STAGE_PERFORMING = 4
+    DRONE_SHOW_STAGE_LANDING = 7
+    DRONE_SHOW_STAGE_LANDED = 8
+    DRONE_SHOW_STAGE_ERROR = 9
+    DRONE_SHOW_PREFLIGHT_BAD_ESTIMATE_ON_PAD = 1 << 6
+
+    def drone_show_file_path(self):
+        return os.path.join("collmot", "show.skyb")
+
+    def write_drone_show_file(self, segments):
+        '''write a Skybrush binary show file with a trajectory made of linear segments'''
+        body = bytearray(struct.pack("<Bhhhh", 1, 0, 0, 0, 0))  # millimetre units, start at origin, yaw 0
+        last = (0, 0, 0)
+        for duration, *xyz in segments:
+            end = tuple(int(round(v * 1000)) for v in xyz)
+            header = 0
+            coords = bytearray()
+            for axis in range(3):
+                if end[axis] != last[axis]:
+                    header |= 1 << (2 * axis)  # linear on this axis
+                    coords += struct.pack("<h", end[axis])
+            body += struct.pack("<BH", header, int(duration * 1000)) + coords
+            last = end
+        path = self.drone_show_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"skyb\x01" + struct.pack("<BH", 1, len(body)) + body)
+
+    def setup_drone_show(self):
+        '''set up SHOW mode as on the AxioLight: position and height from
+        external navigation, 1 m show takeoff altitude; GPS provides the
+        time only.  The vehicle stands where the trajectory starts.'''
+        self.customise_SITL_commandline(["--serial5=sim:vicon:"])
+        self.wait_ready_to_arm()
+        here = self.assert_receive_message('GLOBAL_POSITION_INT')
+        self.write_drone_show_file(self.DRONE_SHOW_TRAJECTORY)
+        self.set_parameters({
+            "EK3_SRC1_POSXY": 6,
+            "EK3_SRC1_VELXY": 0,
+            "EK3_SRC1_POSZ": 6,
+            "EK3_SRC1_VELZ": 0,
+            "EK3_IMU_MASK": 1,
+            "VISO_TYPE": 1,
+            "VISO_POS_M_NSE": 0.12,
+            "SERIAL5_PROTOCOL": 2,
+            "SIM_VICON_TMASK": 1,
+            "SIM_VICON_RATE": 25,
+            "SIM_VICON_PSTD_X": 0.08,
+            "SIM_VICON_PSTD_Y": 0.08,
+            "SIM_VICON_PSTD_Z": 0.12,
+            "WP_SPD_UP": 4,
+            "WP_ACC_Z": 5,
+            "PSC_JERK_D": 20,
+            "LAND_SPD_MS": 0.5,
+            "SHOW_TAKEOFF_ALT": 1,
+            "SHOW_CTRL_RATE": 50,
+            "SHOW_ORIGIN_LAT": here.lat,
+            "SHOW_ORIGIN_LNG": here.lon,
+            "SHOW_ORIENTATION": 0,
+        })
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        self.drone_show_status = []
+
+        def hook(mav, m):
+            if m.get_type() == 'DATA16' and m.type == 0x5B:
+                flags2 = m.data[7]
+                self.drone_show_status.append((self.get_sim_time_cached(), flags2 & 0x0F, flags2 & 0xF0))
+        self.install_message_hook_context(hook)
+
+    def schedule_drone_show(self, lead_time):
+        '''schedule the show to start lead_time seconds from now (GPS time) and authorize it'''
+        unix = self.assert_receive_message('SYSTEM_TIME', timeout=5).time_unix_usec * 1e-6
+        gps_time_of_week = int(unix - 315964800 + 18 + lead_time) % 604800
+        self.set_parameters({
+            "SHOW_START_TIME": gps_time_of_week,
+            "SHOW_START_AUTH": 1,
+        })
+        self.change_mode(self.DRONE_SHOW_MODE)
+
+    def wait_drone_show_stage(self, stage, timeout=60):
+        tstart = self.get_sim_time()
+        while not self.drone_show_status or self.drone_show_status[-1][1] != stage:
+            if self.get_sim_time_cached() - tstart > timeout:
+                raise AutoTestTimeoutException("Show stage did not become %u" % stage)
+            self.delay_sim_time(0.2)
+
+    def drone_show_log(self):
+        '''returns the pad checks and the show stage changes in the current onboard log'''
+        dfreader = self.dfreader_for_current_onboard_log()
+        pad_checks = []
+        stages = []
+        while True:
+            m = dfreader.recv_match(type=['SPAD', 'SHOW'])
+            if m is None:
+                break
+            if m.get_type() == 'SPAD':
+                pad_checks.append(m)
+            elif not stages or stages[-1][1] != m.Stage:
+                stages.append((m.TimeUS * 1e-6, m.Stage))
+        return pad_checks, stages
+
+    def wait_drone_show_takeoff_refused(self, lane):
+        '''check that the pad check failure of the lane is reported before
+        the takeoff time, and that the takeoff is refused'''
+        self.wait_statustext("Pad check failed: lane %u" % lane, check_context=True, timeout=10)
+        self.wait_statustext("Takeoff refused, lane %u on pad" % lane, check_context=True, timeout=20)
+        self.wait_drone_show_stage(self.DRONE_SHOW_STAGE_ERROR, timeout=10)
+        self.wait_disarmed()
+        if not any(stage == self.DRONE_SHOW_STAGE_WAIT_FOR_START_TIME and
+                   flags & self.DRONE_SHOW_PREFLIGHT_BAD_ESTIMATE_ON_PAD
+                   for (t, stage, flags) in self.drone_show_status):
+            raise NotAchievedException("Pad check failure not reported before takeoff")
+        if any(stage == self.DRONE_SHOW_STAGE_TAKEOFF for (t, stage, flags) in self.drone_show_status):
+            raise NotAchievedException("Took off despite the failed pad check")
+        pad_checks, stages = self.drone_show_log()
+        pad = pad_checks[-1]
+        self.progress("Pad check: lane %u, speed %.3f m/s (max %.3f), height %.3f m" %
+                      (pad.Lane, pad.Spd, pad.SpdMax, pad.DZ))
+        if pad.Fail == 0 or pad.Lane != lane:
+            raise NotAchievedException("Unexpected pad check %s" % str(pad))
+
+    def DroneShowPadCheck(self):
+        '''SHOW takeoff is refused if the estimate on the pad is not at rest'''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        self.setup_drone_show()
+        try:
+            self.start_subtest("Healthy estimate: takes off and flies the show")
+            self.schedule_drone_show(20)
+            self.wait_drone_show_stage(self.DRONE_SHOW_STAGE_PERFORMING, timeout=60)
+            self.wait_drone_show_stage(self.DRONE_SHOW_STAGE_LANDED, timeout=90)
+            self.wait_disarmed()
+            pad_checks, stages = self.drone_show_log()
+            pad = pad_checks[-1]
+            self.progress("Pad check: speed %.3f m/s (max %.3f), height %.3f m" % (pad.Spd, pad.SpdMax, pad.DZ))
+            if pad.Fail != 0 or pad.PIMU != 0:
+                raise NotAchievedException("Unexpected pad check %s" % str(pad))
+            if self.DRONE_SHOW_STAGE_PERFORMING not in [s for (t, s) in stages]:
+                raise NotAchievedException("Show not performed")
+            for m in self.context_collection('STATUSTEXT'):
+                if m.text.startswith("Pad check failed"):
+                    raise NotAchievedException("Pad check failed on a healthy estimate")
+
+            self.start_subtest("Waiting stage entered at the takeoff time: no pad check, takeoff refused")
+            self.change_mode('STABILIZE')
+
+            def gps_time():
+                return self.assert_receive_message('SYSTEM_TIME', timeout=5).time_unix_usec * 1e-6 - 315964800 + 18
+            start_time = int(gps_time()) + 5
+            self.set_parameter("SHOW_START_TIME", start_time % 604800)
+            # trajectory above 1 m at 6 s, minus the planned climb and the spool-up time
+            takeoff_time = start_time + 6 - 2 * math.sqrt(1 / 5.0) - self.get_parameter("MOT_SPOOL_TIME")
+            self.delay_sim_time(takeoff_time + 0.5 - gps_time())
+            self.change_mode(self.DRONE_SHOW_MODE)
+            self.wait_statustext("Takeoff refused, no pad check yet", check_context=True, timeout=10)
+            self.wait_disarmed()
+
+            self.start_subtest("One lane, biased accelerometer: takeoff refused")
+            self.change_mode('STABILIZE')
+            self.drone_show_status = []
+            self.schedule_drone_show(20)
+            self.wait_armed(timeout=30)
+            # a lane on an accelerometer with a motor-on offset, as on the drone that climbed away
+            self.set_parameter("SIM_ACC1_BIAS_Z", 0.5)
+            self.wait_drone_show_takeoff_refused(lane=0)
+            self.set_parameter("SIM_ACC1_BIAS_Z", 0)
+
+            self.start_subtest("Two lanes, biased accelerometer of the lane that is not primary: takeoff refused")
+            self.change_mode('STABILIZE')
+            self.set_parameter("EK3_IMU_MASK", 3)
+            self.reboot_sitl()
+            self.wait_ready_to_arm()
+            self.drone_show_status = []
+            self.schedule_drone_show(20)
+            self.wait_armed(timeout=30)
+            self.set_parameter("SIM_ACC2_BIAS_Z", 0.75)
+            self.wait_drone_show_takeoff_refused(lane=1)
+            pad_checks, stages = self.drone_show_log()
+            if pad_checks[-1].PIMU != 0:
+                raise NotAchievedException("Lane 0 is not primary")
+        finally:
+            os.remove(self.drone_show_file_path())
+            self.context_pop()
+            self.reboot_sitl()
+
+    def DroneShowTakeoffDeadline(self):
+        '''SHOW takeoff that does not reach its altitude in time lands in place'''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        self.setup_drone_show()
+        try:
+            # too little thrust to lift off
+            self.set_parameters({
+                "SIM_ENGINE_FAIL": 0b1111,
+                "SIM_ENGINE_MUL": 0.3,
+            })
+            self.schedule_drone_show(20)
+            self.wait_drone_show_stage(self.DRONE_SHOW_STAGE_TAKEOFF, timeout=60)
+            self.wait_statustext("Takeoff stalled for", check_context=True, timeout=20)
+            self.wait_drone_show_stage(self.DRONE_SHOW_STAGE_LANDED, timeout=30)
+            self.wait_disarmed()
+            pad_checks, stages = self.drone_show_log()
+            self.progress("Show stages: %s" % str(stages))
+            sequence = [s for (t, s) in stages]
+            i = sequence.index(self.DRONE_SHOW_STAGE_TAKEOFF)
+            if sequence[i:i+3] != [self.DRONE_SHOW_STAGE_TAKEOFF,
+                                   self.DRONE_SHOW_STAGE_LANDING,
+                                   self.DRONE_SHOW_STAGE_LANDED]:
+                raise NotAchievedException("Unexpected stages after takeoff: %s" % str(sequence[i:]))
+            # spool-up, throttle slew, climb to 1 m at 4 m/s and 5 m/s/s as planned, margin
+            deadline = (self.get_parameter("MOT_SPOOL_TIME") + self.get_parameter("TKOFF_SLEW_TIME") +
+                        2 * math.sqrt(1 / 5.0) + 2)
+            duration = stages[i+1][0] - stages[i][0]
+            if abs(duration - deadline) > 0.2:
+                raise NotAchievedException("Takeoff stage lasted %.2f s, expected %.2f s" % (duration, deadline))
+        finally:
+            os.remove(self.drone_show_file_path())
+            self.context_pop()
+            self.reboot_sitl()
+
     def tests1a(self):
         '''return list of all tests'''
         ret = super(AutoTestCopter, self).tests()  # about 5 mins and ~20 initial tests from autotest/vehicle_test_suite.py
@@ -13729,6 +13965,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.BaseLoggingRates,
              self.BodyFrameOdom,
              self.GPSViconSwitching,
+             self.DroneShowPadCheck,
+             self.DroneShowTakeoffDeadline,
         ])
         return ret
 

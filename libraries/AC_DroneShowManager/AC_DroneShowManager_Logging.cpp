@@ -1,5 +1,7 @@
 #include "AC_DroneShowManager.h"
 
+#include <AP_AHRS/AP_AHRS.h>
+#include <AP_InertialSensor/AP_InertialSensor.h>
 #include <AP_Logger/AP_Logger.h>
 #include <skybrush/skybrush.h>
 
@@ -157,4 +159,31 @@ void AC_DroneShowManager::write_screenplay_log_messages()
             pkt.origin_ms = 0;
         }
     }
+}
+
+// Write a message containing the result of the last pad check
+void AC_DroneShowManager::write_pad_check_log_message() const
+{
+    const AP_InertialSensor &ins = AP::ins();
+    uint8_t accel_mask = 0;
+
+    for (uint8_t i = 0; i < ins.get_accel_count(); i++) {
+        if (ins.use_accel(i)) {
+            accel_mask |= 1U << i;
+        }
+    }
+
+    const struct log_PadCheck pkt {
+        LOG_PACKET_HEADER_INIT(LOG_PAD_CHECK_MSG),
+        time_us         : AP_HAL::micros64(),
+        lane            : _pad_check.lane,
+        speed           : _pad_check.speed,
+        max_speed       : _pad_check.max_speed,
+        height_error    : _pad_check.height_error,
+        failures        : _pad_check.failures,
+        primary_imu     : AP::ahrs().get_primary_accel_index(),
+        accel_mask      : accel_mask,
+    };
+
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }

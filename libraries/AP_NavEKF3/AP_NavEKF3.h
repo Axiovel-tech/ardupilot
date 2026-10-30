@@ -76,8 +76,17 @@ public:
     // If false returned, do not use for flight control
     bool getPosD(postype_t &posD) const;
 
+    // Write the last calculated D position of the specified instance relative to the reference point (m)
+    // An out of range instance (eg -1) returns data for the primary instance
+    // If a calculated solution is not available, use the best available data and return false
+    bool getPosD(int8_t instance, postype_t &posD) const;
+
     // return NED velocity in m/s
     void getVelNED(Vector3f &vel) const;
+
+    // return NED velocity of the specified instance in m/s
+    // An out of range instance (eg -1) returns data for the primary instance
+    void getVelNED(int8_t instance, Vector3f &vel) const;
 
     // return estimate of true airspeed vector in body frame in m/s
     // returns false if estimate is unavailable

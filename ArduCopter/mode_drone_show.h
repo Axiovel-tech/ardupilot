@@ -98,6 +98,10 @@ private:
     // Stores whether we have performed the preflight calibration before takeoff.
     bool _preflight_calibration_done;
 
+    // Time after which a takeoff into the show that is still below the
+    // altitude where it hands over to the show is given up, in milliseconds
+    int32_t _takeoff_deadline_msec;
+
     // Timestamp until we block arming attempts during the startup phase if we
     // have attempted to arm the drone recently
     uint32_t _prevent_arming_until_msec;
@@ -135,6 +139,8 @@ private:
     void takeoff_run();
     bool takeoff_completed() const;
     bool takeoff_timed_out() const;
+    bool takeoff_overdue() const;
+    bool reached_takeoff_exit_altitude(int32_t& altitude_above_home_cm) const;
 
     void performing_start();
     void performing_run();
