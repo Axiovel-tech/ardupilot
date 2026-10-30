@@ -749,6 +749,9 @@ private:
     // constrain variances (diagonal terms) in the state covariance matrix
     void ConstrainVariances();
 
+    // keep the Z accel bias variance up after take-off (EK3_ABIAS_TKO)
+    void updateTakeoffAccelBiasVariance();
+
     // constrain states
     void ConstrainStates();
 
@@ -1238,6 +1241,7 @@ private:
     uint32_t magYawResetTimer_ms;   // timer in msec used to track how long good magnetometer data is failing innovation consistency checks
     bool consistentMagData;         // true when the magnetometers are passing consistency checks
     bool motorsArmed;               // true when the motors have been armed
+    uint32_t takeoffAccelBiasStart_ms; // time the vehicle started flying since arming, 0 if not yet
     bool prevMotorsArmed;           // value of motorsArmed from previous frame
     bool posVelFusionDelayed;       // true when the position and velocity fusion has been delayed
 #if EK3_FEATURE_OPTFLOW_FUSION

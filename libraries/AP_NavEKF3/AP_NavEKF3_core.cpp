@@ -305,6 +305,7 @@ void NavEKF3_core::InitialiseVariables()
     gpsGoodToAlign = false;
     gpsIsInUse = false;
     motorsArmed = false;
+    takeoffAccelBiasStart_ms = 0;
     prevMotorsArmed = false;
     memset(&gpsCheckStatus, 0, sizeof(gpsCheckStatus));
     gpsSpdAccPass = false;
@@ -668,6 +669,8 @@ void NavEKF3_core::UpdateFilter(bool predict)
 
         // Predict the covariance growth
         CovariancePrediction(nullptr);
+
+        updateTakeoffAccelBiasVariance();
 
         // Run the IMU prediction step for the GSF yaw estimator algorithm
         // using IMU and optionally true airspeed data.
@@ -1817,6 +1820,36 @@ void NavEKF3_core::CovariancePrediction(Vector3F *rotVarVecPtr)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     verifyTiltErrorVariance();
 #endif
+}
+
+/*
+  Thrust can shift an IMU's vertical accel offset in a step at take-off that
+  then decays over about a minute, while the Z accel bias variance has
+  collapsed on the ground where height is observable. Keep that variance up
+  from the start of flight, shrinking to zero over decayTime.
+ */
+void NavEKF3_core::updateTakeoffAccelBiasVariance()
+{
+    if (!motorsArmed) {
+        takeoffAccelBiasStart_ms = 0;
+        return;
+    }
+    const ftype sigma = frontend->_accBiasTkoSigma.get();
+    if (!is_positive(sigma)) {
+        return;
+    }
+    if (takeoffAccelBiasStart_ms == 0) {
+        if (dal.get_time_flying_ms() == 0) {
+            return;
+        }
+        takeoffAccelBiasStart_ms = imuSampleTime_ms;
+    }
+    const ftype decayTime = 60; // s
+    const ftype remaining = 1 - (imuSampleTime_ms - takeoffAccelBiasStart_ms) * 0.001 / decayTime;
+    if (remaining <= 0 || inhibitDelVelBiasStates || dvelBiasAxisInhibit[2]) {
+        return;
+    }
+    P[15][15] = MAX(P[15][15], sq(sigma * remaining * dtEkfAvg));
 }
 
 // zero specified range of rows in the state covariance matrix

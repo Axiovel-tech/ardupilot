@@ -752,6 +752,15 @@ const AP_Param::GroupInfo NavEKF3::var_info2[] = {
     // @RebootRequired: True
     AP_GROUPINFO("ACC_AVG", 20, NavEKF3, _accAvgMask, 0),
 
+    // @Param: ABIAS_TKO
+    // @DisplayName: Take-off accelerometer Z bias uncertainty
+    // @Description: Thrust can shift the vertical accelerometer offset in a step at take-off that then decays over about a minute, while the Z accel bias uncertainty has collapsed on the ground. When the vehicle starts flying the Z accel bias uncertainty is kept at least this large, shrinking to zero over the following 60 seconds, so that the bias estimate follows the step and its decay. Set to 0 to disable.
+    // @Range: 0 0.5
+    // @Increment: 0.05
+    // @Units: m/s/s
+    // @User: Advanced
+    AP_GROUPINFO("ABIAS_TKO", 21, NavEKF3, _accBiasTkoSigma, 0.0f),
+
     AP_GROUPEND
 };
 
