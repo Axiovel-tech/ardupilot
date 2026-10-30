@@ -9,6 +9,11 @@
 // same lead time before takeoff.
 static constexpr int64_t SHOW_CLOCK_COMMIT_BEFORE_START_USEC = 10000000;
 
+// The ground re-sends a schedule with drift corrections of milliseconds; a
+// change this large under the same ID is its re-send in a new timebase that
+// this drone's show clock has not stepped to yet
+static constexpr uint64_t SHOW_SCHEDULE_MAX_CORRECTION_USEC = 1000000;
+
 static uint64_t get_gps_timestamp_usec();
 static bool is_safe_to_change_start_time_in_stage(DroneShowModeStage stage);
 
@@ -233,6 +238,12 @@ ShowScheduleAction AC_DroneShowManager::_apply_show_schedule(uint16_t schedule_i
 
     if (schedule_id == _show_schedule_id) {
         if (_start_time_on_show_clock_usec > 0 && !_start_time_on_show_clock_committed) {
+            const uint64_t held_usec = _start_time_on_show_clock_usec;
+            const uint64_t change_usec = start_cluster_usec > held_usec ? start_cluster_usec - held_usec : held_usec - start_cluster_usec;
+            if (change_usec >= SHOW_SCHEDULE_MAX_CORRECTION_USEC) {
+                // Taken once the show clock steps and drops the held start
+                return ShowScheduleAction_Ignored;
+            }
             // A drift correction of the start this drone holds
             if (_show_clock.is_valid()) {
                 _set_start_time_on_show_clock(start_cluster_usec);

@@ -160,6 +160,11 @@ def main() -> int:
         e = rig.fresh_echo()
         check("re-send of id 1 updates the value", e.schedule_id == 1 and e.start == start1 + 700, f"{e}")
 
+        # The ground's re-send in a new timebase before this drone's clock steps
+        rig.schedule(1, start1 - 5_000_000)
+        e = rig.fresh_echo()
+        check("same id moved by seconds before a clock step ignored", e.schedule_id == 1 and e.start == start1 + 700, f"{e}")
+
         start2 = rig.cluster_us() + 40_000_000
         rig.schedule(2, start2)
         e = rig.fresh_echo()
