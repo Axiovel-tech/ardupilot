@@ -752,6 +752,14 @@ const AP_Param::GroupInfo NavEKF3::var_info2[] = {
     // @RebootRequired: True
     AP_GROUPINFO("ACC_AVG", 20, NavEKF3, _accAvgMask, 0),
 
+    // @Param: ABIAS_DIFF
+    // @DisplayName: Averaged accelerometers Z bias uncertainty per IMU difference change
+    // @Description: With EK3_ACC_AVG, a change in the vertical accel difference of the two averaged IMUs shows that their offsets are moving, for example as a heat-soaked board cools in propwash, and the average's own offset moves by a fraction of that change: at most half if only one IMU moves. The Z accel bias uncertainty is kept at least this fraction of the recent change of the difference, so the bias estimate follows the average's offset while the IMUs' offsets move and is left alone once they settle. Set to 0 to disable.
+    // @Range: 0 0.5
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ABIAS_DIFF", 21, NavEKF3, _accBiasDiffScale, 0.0f),
+
     AP_GROUPEND
 };
 

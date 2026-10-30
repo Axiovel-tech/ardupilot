@@ -346,6 +346,7 @@ void NavEKF3_core::InitialiseVariables()
     accelAvg.fade = 1;
     accelAvg.diff.zero();
     accelAvg.heldDiff.zero();
+    accelAvg.diffSlowZ = 0;
     accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
     accelAvg.offset.zero();
     accelAvg.faulted = 0;
@@ -668,6 +669,8 @@ void NavEKF3_core::UpdateFilter(bool predict)
 
         // Predict the covariance growth
         CovariancePrediction(nullptr);
+
+        updateAveragedAccelBiasVariance();
 
         // Run the IMU prediction step for the GSF yaw estimator algorithm
         // using IMU and optionally true airspeed data.
@@ -1817,6 +1820,30 @@ void NavEKF3_core::CovariancePrediction(Vector3F *rotVarVecPtr)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     verifyTiltErrorVariance();
 #endif
+}
+
+/*
+  While the two averaged IMUs' offsets move, their difference moves with
+  them, and their average's offset moves by up to a fraction of that. Keep
+  the Z accel bias variance at least that fraction of the recent change of
+  the difference, so the bias estimate follows the average while the IMUs'
+  offsets move and is left alone once they settle.
+ */
+ftype NavEKF3_core::averagedAccelBiasFloor() const
+{
+    if (!accelAvg.enabled || accelAvg.faulted != 0) {
+        return 0;
+    }
+    return frontend->_accBiasDiffScale.get() * fabsF(accelAvg.diff.z - accelAvg.diffSlowZ);
+}
+
+void NavEKF3_core::updateAveragedAccelBiasVariance()
+{
+    const ftype sigma = averagedAccelBiasFloor();
+    if (!is_positive(sigma) || inhibitDelVelBiasStates || dvelBiasAxisInhibit[2]) {
+        return;
+    }
+    P[15][15] = MAX(P[15][15], sq(sigma * dtEkfAvg));
 }
 
 // zero specified range of rows in the state covariance matrix
