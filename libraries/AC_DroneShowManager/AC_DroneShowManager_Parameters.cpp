@@ -227,7 +227,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: SYNC_MODE
     // @DisplayName: Time synchronization mode
-    // @Description: Time synchronization mode to use when starting the show. Show clock: the start time is scheduled on the show clock broadcast by the positioning tag, then frozen on the internal clock 10 seconds before the start; the RC start switch works as in countdown mode.
+    // @Description: Time synchronization mode to use when starting the show. Show clock: the start arrives as an Axio schedule on the UWB cluster clock that the positioning tag broadcasts, is frozen on the internal clock 10 seconds before the start and can only be aborted after that; the RC start switch works as in countdown mode.
     // @Values: 0:Countdown, 1:GPS time, 2:Show clock
     // @User: Advanced
     // @RebootRequired: True
@@ -401,6 +401,8 @@ bool AC_DroneShowManager::should_switch_to_show_mode_when_authorized() const
 
 void AC_DroneShowManager::_check_changes_in_parameters()
 {
+    static int32_t last_seen_start_time_gps_sec = -1;
+    static int16_t last_seen_start_time_gps_msec_offset = 0;
     static bool last_seen_show_authorization_state = false;
     static int16_t last_seen_control_rate_hz = DEFAULT_UPDATE_RATE_HZ;
     static int32_t last_seen_origin_lat = 200000000;        // intentionally invalid
@@ -417,8 +419,8 @@ void AC_DroneShowManager::_check_changes_in_parameters()
         !is_zero(_params.orientation_deg - last_seen_orientation_deg)
     );
     bool new_start_time_pending = (
-        _params.start_time_gps_sec != _last_seen_start_time_gps_sec ||
-        _params.start_time_gps_msec_offset != _last_seen_start_time_gps_msec_offset
+        _params.start_time_gps_sec != last_seen_start_time_gps_sec ||
+        _params.start_time_gps_msec_offset != last_seen_start_time_gps_msec_offset
     );
     bool new_show_authorization_pending = _params.authorization != last_seen_show_authorization_state;
 
@@ -440,54 +442,41 @@ void AC_DroneShowManager::_check_changes_in_parameters()
         // with a countdown
         if (
             !_is_safe_to_change_start_time_in_current_stage() ||
-            (!uses_gps_time_for_show_start() && !uses_show_clock_for_show_start())
+            !uses_gps_time_for_show_start()
         ) {
             new_start_time_pending = false;
         }
     }
 
-    if (new_start_time_pending && (_is_start_time_reference_ok() || _params.start_time_gps_sec < 0)) {
-        _last_seen_start_time_gps_sec = _params.start_time_gps_sec;
-        _last_seen_start_time_gps_msec_offset = _params.start_time_gps_msec_offset;
+    if (new_start_time_pending && (_is_gps_time_ok() || _params.start_time_gps_sec < 0)) {
+        last_seen_start_time_gps_sec = _params.start_time_gps_sec;
+        last_seen_start_time_gps_msec_offset = _params.start_time_gps_msec_offset;
 
-        if (_last_seen_start_time_gps_sec >= 0) {
-            start_time_gps_msec = _last_seen_start_time_gps_sec * 1000 + _last_seen_start_time_gps_msec_offset;
-
-            if (uses_show_clock_for_show_start()) {
-                _set_start_time_on_show_clock(start_time_gps_msec);
+        if (last_seen_start_time_gps_sec >= 0) {
+            uint16_t gps_week_of_start_time;
+           
+            start_time_gps_msec = last_seen_start_time_gps_sec * 1000 + last_seen_start_time_gps_msec_offset;
+            if (AP::gps().time_week_ms() < start_time_gps_msec) {
+                // Interpret the given timestamp in the current GPS week as it is in
+                // the future even with the same GPS week number
+                gps_week_of_start_time = AP::gps().time_week();
             } else {
-                uint16_t gps_week_of_start_time;
-
-                if (AP::gps().time_week_ms() < start_time_gps_msec) {
-                    // Interpret the given timestamp in the current GPS week as it is in
-                    // the future even with the same GPS week number
-                    gps_week_of_start_time = AP::gps().time_week();
-                } else {
-                    // Interpret the given timestamp in the next GPS week as it is in
-                    // the past with the same GPS week number
-                    gps_week_of_start_time = AP::gps().time_week() + 1;
-                }
-
-                _start_time_unix_usec = AP::gps().istate_time_to_epoch_ms(
-                    gps_week_of_start_time, start_time_gps_msec
-                ) * 1000ULL;
+                // Interpret the given timestamp in the next GPS week as it is in
+                // the past with the same GPS week number
+                gps_week_of_start_time = AP::gps().time_week() + 1;
             }
+
+            _start_time_unix_usec = AP::gps().istate_time_to_epoch_ms(
+                gps_week_of_start_time, start_time_gps_msec
+            ) * 1000ULL;
 
             if (_start_time_requested_by == StartTimeSource::NONE) {
                 _start_time_requested_by = StartTimeSource::PARAMETER;
             }
         } else {
             _start_time_unix_usec = 0;
-            _start_time_on_show_clock_usec = 0;
-            _start_time_on_internal_clock_usec = 0;
             _start_time_requested_by = StartTimeSource::NONE;
         }
-    } else if (new_start_time_pending && uses_show_clock_for_show_start()) {
-        // The changed start stays pending until the show clock is back, and
-        // the previous start must not fire in its place meanwhile
-        _start_time_on_show_clock_usec = 0;
-        _start_time_on_internal_clock_usec = 0;
-        _start_time_requested_by = StartTimeSource::NONE;
     }
 
     if (new_show_authorization_pending) {

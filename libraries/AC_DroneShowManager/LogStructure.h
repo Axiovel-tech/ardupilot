@@ -9,7 +9,8 @@
     LOG_SCREENPLAY_ENTRY_MSG, \
     LOG_CRTH_TRIGGER_MSG, \
     LOG_SHOW_CLOCK_MSG, \
-    LOG_SHOW_CLOCK_COMMIT_MSG
+    LOG_SHOW_CLOCK_COMMIT_MSG, \
+    LOG_SHOW_SCHEDULE_MSG
 
 // @LoggerMessage: SHOW
 // @Description: Drone show mode information
@@ -131,7 +132,7 @@ struct PACKED log_CollectiveRTHTrigger {
 // @LoggerMessage: SCLK
 // @Description: Show clock sample received from the positioning tag
 // @Field: TimeUS: Time since system startup
-// @Field: Show: Show clock time in the sample, microseconds since the GPS epoch
+// @Field: Show: Show clock time in the sample (UWB cluster clock)
 // @Field: Off: Internal clock minus show clock after the sample
 // @Field: N: Number of samples in the filter window
 // @Field: Acc: Whether the sample was accepted (0: ignored as an outlier)
@@ -147,10 +148,11 @@ struct PACKED log_ShowClock {
 // @LoggerMessage: SCOM
 // @Description: Show start committed on the internal clock
 // @Field: TimeUS: Time since system startup
-// @Field: Start: Start time on the show clock, microseconds since the GPS epoch
+// @Field: Start: Start time on the show clock (UWB cluster clock)
 // @Field: LStart: Start time on the internal clock
 // @Field: Off: Internal clock minus show clock used for the commit
 // @Field: Valid: Whether the show clock was valid at the commit
+// @Field: Id: ID of the show schedule that set the start
 struct PACKED log_ShowClockCommit {
     LOG_PACKET_HEADER;
     uint64_t time_us;
@@ -158,6 +160,21 @@ struct PACKED log_ShowClockCommit {
     uint64_t start_local_us;
     int64_t offset_us;
     uint8_t clock_valid;
+    uint16_t schedule_id;
+};
+
+// @LoggerMessage: SSCH
+// @Description: Show schedule received from the ground and what was done with it; repetitions are not logged
+// @Field: TimeUS: Time since system startup
+// @Field: Id: Schedule ID
+// @Field: Start: Start time on the show clock (UWB cluster clock); 0 clears or aborts
+// @Field: Act: 0 ignored (start committed), 1 scheduled, 2 cleared, 3 refused (less than 10 s ahead), 4 aborted, 5 no show clock (waits for a repetition), 6 dropped on a show clock timebase step
+struct PACKED log_ShowSchedule {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint16_t schedule_id;
+    uint64_t start_show_us;
+    uint8_t action;
 };
 
 #define LOG_STRUCTURE_FROM_DRONE_SHOW \
@@ -174,4 +191,6 @@ struct PACKED log_ShowClockCommit {
     { LOG_SHOW_CLOCK_MSG, sizeof(log_ShowClock),                         \
       "SCLK", "QQqBB", "TimeUS,Show,Off,N,Acc", "sss--", "FFF--" }, \
     { LOG_SHOW_CLOCK_COMMIT_MSG, sizeof(log_ShowClockCommit),            \
-      "SCOM", "QQQqB", "TimeUS,Start,LStart,Off,Valid", "ssss-", "FFFF-" }
+      "SCOM", "QQQqBH", "TimeUS,Start,LStart,Off,Valid,Id", "ssss--", "FFFF--" }, \
+    { LOG_SHOW_SCHEDULE_MSG, sizeof(log_ShowSchedule),                   \
+      "SSCH", "QHQB", "TimeUS,Id,Start,Act", "s-s-", "F-F-" }

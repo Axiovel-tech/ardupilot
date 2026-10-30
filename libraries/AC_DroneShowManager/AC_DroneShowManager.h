@@ -99,15 +99,20 @@ private:
         uint32_t delta_msec;
     };
 
-    // Maps the show clock (microseconds since the GPS epoch, received from the
-    // positioning tag in AXIO_SHOW_CLOCK packets) onto AP_HAL::micros64(),
+    // Maps the show clock (the UWB cluster clock in microseconds, received from
+    // the positioning tag in AXIO_SHOW_CLOCK packets) onto AP_HAL::micros64(),
     // using the lowest-latency sample of a short window of samples.
     class ShowClock {
     public:
+        enum class SampleResult {
+            IGNORED,        // outlier, or an unconfirmed step
+            ACCEPTED,
+            TIMEBASE_STEP,  // accepted as a step of at least TIMEBASE_STEP_USEC
+        };
+
         ShowClock();
 
-        // Returns whether the sample was accepted
-        bool handle_sample(uint64_t show_time_usec, uint64_t local_usec);
+        SampleResult handle_sample(uint64_t show_time_usec, uint64_t local_usec);
         bool is_valid() const;
         uint64_t local_to_show_usec(uint64_t local_usec) const;
         uint64_t show_to_local_usec(uint64_t show_usec) const;
@@ -124,14 +129,19 @@ private:
         // invalid and the next sample starts a new window
         static constexpr uint32_t TIMEOUT_MSEC = 2000;
 
-        // A sample implying this much less latency than the current estimate
-        // cannot be explained by transport jitter; it is ignored unless
-        // STEP_CONFIRM_SAMPLES consecutive samples agree on it within
-        // STEP_AGREE_USEC (a genuine step of the show clock, e.g. a re-pin),
+        // A sample implying this much less latency than the current estimate,
+        // or this much more on a serial link, cannot be explained by transport
+        // jitter; it is ignored unless STEP_CONFIRM_SAMPLES consecutive samples
+        // agree on it within STEP_AGREE_USEC (a genuine step of the show clock),
         // which then make up the new window
         static constexpr int64_t MAX_AHEAD_USEC = 20000;
+        static constexpr int64_t MAX_BEHIND_USEC = 1000000;
         static constexpr uint8_t STEP_CONFIRM_SAMPLES = 3;
         static constexpr int64_t STEP_AGREE_USEC = 5000;
+
+        // A step this large is a new timebase (the cluster restarted), so a
+        // start time expressed in the old one is meaningless
+        static constexpr int64_t TIMEBASE_STEP_USEC = 1000000;
 
         void push(int64_t offset_usec);
 
@@ -295,7 +305,7 @@ public:
 
     // Returns the start time in microseconds. Depending on the value of the
     // SHOW_SYNC_MODE parameter, this might be an internal timestamp, a
-    // UNIX timestamp or a show clock timestamp. Do _not_ use this method for
+    // UNIX timestamp or a cluster clock timestamp. Do _not_ use this method for
     // anything else than determining whether the start time was changed.
     uint64_t get_start_time_epoch_undefined() const {
         switch (_params.time_sync_mode) {
@@ -597,6 +607,13 @@ public:
 
     // Writes the start committed on the internal clock into the log
     void write_show_clock_commit_log_message() const;
+
+    // Writes the action taken on a show schedule packet into the log, unless it
+    // repeats the previous one
+    void write_show_schedule_log_message(uint16_t schedule_id, uint64_t start_cluster_usec, ShowScheduleAction action);
+
+    // Sends the show schedule as this drone holds it (show clock sync mode only)
+    void send_show_schedule_status(const mavlink_channel_t chan) const;
     
     // Writes a message containing a summary of the gefence status into the log
     void write_fence_status_log_message() const;
@@ -834,11 +851,11 @@ private:
     // synchronized across drones.
     uint64_t _start_time_unix_usec;
 
-    // Start time of the show on the show clock (microseconds since the GPS
-    // epoch), zero if unset or if the start was set on the internal clock
-    // (e.g. with the RC switch). Used only in TimeSyncMode_ShowClock, where
-    // the show runs on _start_time_on_internal_clock_usec, which is derived
-    // from this value until the start is committed.
+    // Start time of the show on the cluster clock in microseconds, zero if
+    // unset or if the start was set on the internal clock (e.g. with the RC
+    // switch). Used only in TimeSyncMode_ShowClock, where the show runs on
+    // _start_time_on_internal_clock_usec, which is derived from this value
+    // until the start is committed.
     uint64_t _start_time_on_show_clock_usec;
 
     // Whether _start_time_on_internal_clock_usec is frozen because the start
@@ -849,9 +866,16 @@ private:
     // Mapping between the show clock and the internal clock
     ShowClock _show_clock;
 
-    // SHOW_START_TIME and SHOW_START_MSEC values that were last acted upon
-    int32_t _last_seen_start_time_gps_sec;
-    int16_t _last_seen_start_time_gps_msec_offset;
+    // ID of the last show schedule acted upon, zero if none
+    uint16_t _show_schedule_id;
+
+    // Last show schedule log entry, to log changes only
+    struct {
+        uint16_t schedule_id;
+        uint64_t start_cluster_usec;
+        ShowScheduleAction action;
+        bool written;
+    } _last_show_schedule_log;
 
     // Takeoff position, in local coordinates, relative to the show coordinate system.
     // Zero if no show data is loaded. Units are in millimeters.
@@ -1071,6 +1095,12 @@ private:
     // Handles a show clock packet from the positioning tag
     bool _handle_show_clock_packet(void* data, uint8_t length);
 
+    // Handles a show schedule packet from the ground
+    bool _handle_show_schedule_packet(void* data, uint8_t length);
+
+    // Applies a show schedule from the ground and returns what was done
+    ShowScheduleAction _apply_show_schedule(uint16_t schedule_id, uint64_t start_cluster_usec);
+
     // Handles a start time configuration packet
     bool _handle_start_time_configuration_packet(void* data, uint8_t length);
 
@@ -1144,9 +1174,14 @@ private:
     bool _load_show_file_from_storage();
     void _set_show_data_and_take_ownership(uint8_t *value);
 
-    // Schedules the start at the given time of the current or next week on
-    // the show clock (whichever is in the future). The show clock must be valid.
-    void _set_start_time_on_show_clock(uint32_t time_of_week_msec);
+    // Schedules the start at the given time on the cluster clock. The show
+    // clock must be valid.
+    void _set_start_time_on_show_clock(uint64_t start_cluster_usec);
+
+    // Returns whether the scheduled start can only be aborted: a show clock
+    // start after its commit, or a start on the internal clock (RC switch or
+    // countdown), until the start has passed on the ground
+    bool _is_start_time_committed() const;
 
     // Re-derives the internal start time from the show clock start time until
     // the start is committed. This has to be called regularly from update().

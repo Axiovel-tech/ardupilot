@@ -1,4 +1,5 @@
 #include <AP_GPS/AP_GPS.h>
+#include <GCS_MAVLink/GCS.h>
 
 #include "AC_DroneShowManager.h"
 #include "AC_DroneShowManager/DroneShow_Enums.h"
@@ -7,8 +8,6 @@
 // the internal clock; the drone show mode calibrates the barometer at the
 // same lead time before takeoff.
 static constexpr int64_t SHOW_CLOCK_COMMIT_BEFORE_START_USEC = 10000000;
-
-static constexpr uint64_t USEC_PER_WEEK = AP_MSEC_PER_WEEK * 1000ULL;
 
 static uint64_t get_gps_timestamp_usec();
 static bool is_safe_to_change_start_time_in_stage(DroneShowModeStage stage);
@@ -179,23 +178,93 @@ bool AC_DroneShowManager::_is_start_time_reference_ok() const
     return uses_show_clock_for_show_start() ? _show_clock.is_valid() : _is_gps_time_ok();
 }
 
-void AC_DroneShowManager::_set_start_time_on_show_clock(uint32_t time_of_week_msec)
+void AC_DroneShowManager::_set_start_time_on_show_clock(uint64_t start_cluster_usec)
 {
-    const uint64_t now_usec = _show_clock.local_to_show_usec(AP_HAL::micros64());
-    uint64_t start_usec = now_usec - (now_usec % USEC_PER_WEEK) + time_of_week_msec * 1000ULL;
-
-    // Same week resolution as with GPS time: a time of week that is not in
-    // the future refers to the next week
-    if (start_usec <= now_usec) {
-        start_usec += USEC_PER_WEEK;
-    }
-
-    _start_time_on_show_clock_usec = start_usec;
-    _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(start_usec);
+    _start_time_on_show_clock_usec = start_cluster_usec;
+    _start_time_on_internal_clock_usec = _show_clock.show_to_local_usec(start_cluster_usec);
+    _start_time_requested_by = StartTimeSource::PARAMETER;
     _start_time_on_show_clock_committed = get_time_until_start_usec() <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC;
     if (_start_time_on_show_clock_committed) {
         write_show_clock_commit_log_message();
     }
+}
+
+bool AC_DroneShowManager::_is_start_time_committed() const
+{
+    if (!has_scheduled_start_time()) {
+        return false;
+    }
+    if (!_is_safe_to_change_start_time_in_current_stage()) {
+        return true;
+    }
+    if (get_time_until_start_usec() <= 0) {
+        return false;
+    }
+    return _start_time_on_show_clock_usec == 0 || _start_time_on_show_clock_committed;
+}
+
+ShowScheduleAction AC_DroneShowManager::_apply_show_schedule(uint16_t schedule_id, uint64_t start_cluster_usec)
+{
+    const bool committed = _is_start_time_committed();
+
+    if (start_cluster_usec == 0) {
+        _show_schedule_id = schedule_id;
+        if (!has_scheduled_start_time()) {
+            return ShowScheduleAction_Cleared;
+        }
+        if (!_is_safe_to_change_start_time_in_current_stage()) {
+            return ShowScheduleAction_Ignored;
+        }
+        clear_scheduled_start_time(/* force = */ true);
+        if (committed) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Show start aborted");
+            return ShowScheduleAction_Aborted;
+        }
+        return ShowScheduleAction_Cleared;
+    }
+
+    if (committed) {
+        return ShowScheduleAction_Ignored;
+    }
+
+    if (schedule_id == _show_schedule_id) {
+        // A drift correction of the start this drone holds; the schedule may
+        // also have been refused or taken over by the RC switch meanwhile
+        if (_start_time_on_show_clock_usec == 0) {
+            return ShowScheduleAction_Ignored;
+        }
+        if (_show_clock.is_valid()) {
+            _set_start_time_on_show_clock(start_cluster_usec);
+        }
+        return ShowScheduleAction_Scheduled;
+    }
+
+    if (!_is_safe_to_change_start_time_in_current_stage()) {
+        return ShowScheduleAction_Ignored;
+    }
+
+    if (!_show_clock.is_valid()) {
+        // The ID is not recorded, so the next repetition counts as new once
+        // the clock is back
+        if (has_scheduled_start_time()) {
+            clear_scheduled_start_time(/* force = */ true);
+        }
+        return ShowScheduleAction_NoClock;
+    }
+
+    _show_schedule_id = schedule_id;
+
+    const int64_t lead_usec = int64_t(_show_clock.show_to_local_usec(start_cluster_usec)) - int64_t(AP_HAL::micros64());
+    if (lead_usec <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC) {
+        if (has_scheduled_start_time()) {
+            clear_scheduled_start_time(/* force = */ true);
+        }
+        gcs().send_text(MAV_SEVERITY_WARNING, "Show start refused: less than 10 s ahead");
+        return ShowScheduleAction_Refused;
+    }
+
+    _set_start_time_on_show_clock(start_cluster_usec);
+    return ShowScheduleAction_Scheduled;
 }
 
 void AC_DroneShowManager::_update_start_time_from_show_clock()
@@ -229,26 +298,31 @@ AC_DroneShowManager::ShowClock::ShowClock() :
 {
 }
 
-bool AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
+AC_DroneShowManager::ShowClock::SampleResult AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint64_t local_usec)
 {
     const int64_t offset_usec = int64_t(local_usec) - int64_t(show_time_usec);
     const uint32_t now_msec = AP_HAL::millis();
+    const int64_t jump_usec = offset_usec - _offset_usec;
+    const bool timebase_jump = jump_usec >= TIMEBASE_STEP_USEC || jump_usec <= -TIMEBASE_STEP_USEC;
+    bool timebase_step = false;
 
     if (_count > 0 && now_msec - _last_sample_at_msec >= TIMEOUT_MSEC) {
+        timebase_step = timebase_jump;
         _count = 0;
         _next = 0;
         _step_count = 0;
     }
 
-    if (_count > 0 && offset_usec < _offset_usec - MAX_AHEAD_USEC) {
+    if (_count > 0 && (jump_usec < -MAX_AHEAD_USEC || jump_usec > MAX_BEHIND_USEC)) {
         const int64_t step_spread_usec = offset_usec - _step_window[0];
         if (_step_count == 0 || step_spread_usec > STEP_AGREE_USEC || step_spread_usec < -STEP_AGREE_USEC) {
             _step_count = 0;
         }
         _step_window[_step_count++] = offset_usec;
         if (_step_count < STEP_CONFIRM_SAMPLES) {
-            return false;
+            return SampleResult::IGNORED;
         }
+        timebase_step = timebase_jump;
         _count = 0;
         _next = 0;
         for (uint8_t i = 0; i < STEP_CONFIRM_SAMPLES - 1; i++) {
@@ -259,7 +333,7 @@ bool AC_DroneShowManager::ShowClock::handle_sample(uint64_t show_time_usec, uint
 
     push(offset_usec);
     _last_sample_at_msec = now_msec;
-    return true;
+    return timebase_step ? SampleResult::TIMEBASE_STEP : SampleResult::ACCEPTED;
 }
 
 void AC_DroneShowManager::ShowClock::push(int64_t offset_usec)

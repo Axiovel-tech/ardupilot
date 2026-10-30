@@ -182,6 +182,34 @@ void AC_DroneShowManager::write_show_clock_commit_log_message() const
         start_local_us : _start_time_on_internal_clock_usec,
         offset_us      : _show_clock.offset_usec(),
         clock_valid    : _show_clock.is_valid(),
+        schedule_id    : _show_schedule_id,
+    };
+
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+}
+
+void AC_DroneShowManager::write_show_schedule_log_message(
+    uint16_t schedule_id, uint64_t start_cluster_usec, ShowScheduleAction action
+) {
+    if (
+        _last_show_schedule_log.written &&
+        _last_show_schedule_log.schedule_id == schedule_id &&
+        _last_show_schedule_log.start_cluster_usec == start_cluster_usec &&
+        _last_show_schedule_log.action == action
+    ) {
+        return;
+    }
+    _last_show_schedule_log.schedule_id = schedule_id;
+    _last_show_schedule_log.start_cluster_usec = start_cluster_usec;
+    _last_show_schedule_log.action = action;
+    _last_show_schedule_log.written = true;
+
+    const struct log_ShowSchedule pkt {
+        LOG_PACKET_HEADER_INIT(LOG_SHOW_SCHEDULE_MSG),
+        time_us       : AP_HAL::micros64(),
+        schedule_id   : schedule_id,
+        start_show_us : start_cluster_usec,
+        action        : action,
     };
 
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
