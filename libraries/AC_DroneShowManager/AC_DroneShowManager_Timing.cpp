@@ -197,23 +197,31 @@ bool AC_DroneShowManager::_is_start_time_committed() const
     if (!_is_safe_to_change_start_time_in_current_stage()) {
         return true;
     }
-    if (get_time_until_start_usec() <= 0) {
+    if (_start_time_on_show_clock_usec > 0 && !_start_time_on_show_clock_committed) {
         return false;
     }
-    return _start_time_on_show_clock_usec == 0 || _start_time_on_show_clock_committed;
+
+    // A lights-only show runs on the ground in a stage that allows changes, so
+    // the start stays committed until the end of the show
+    const float duration_sec = _trajectory_stats.duration_sec;
+    const int64_t duration_usec = isfinite(duration_sec) && duration_sec > 0 ? int64_t(duration_sec * 1.0e6f) : 0;
+    return get_elapsed_time_since_start_usec() < duration_usec;
 }
 
 ShowScheduleAction AC_DroneShowManager::_apply_show_schedule(uint16_t schedule_id, uint64_t start_cluster_usec)
 {
     const bool committed = _is_start_time_committed();
 
+    // Nothing changes a show once it started, in the air or lights-only on
+    // the ground
+    if (!_is_safe_to_change_start_time_in_current_stage() || (committed && get_time_until_start_usec() <= 0)) {
+        return ShowScheduleAction_Ignored;
+    }
+
     if (start_cluster_usec == 0) {
         _show_schedule_id = schedule_id;
         if (!has_scheduled_start_time()) {
             return ShowScheduleAction_Cleared;
-        }
-        if (!_is_safe_to_change_start_time_in_current_stage()) {
-            return ShowScheduleAction_Ignored;
         }
         clear_scheduled_start_time(/* force = */ true);
         if (committed) {
@@ -223,24 +231,27 @@ ShowScheduleAction AC_DroneShowManager::_apply_show_schedule(uint16_t schedule_i
         return ShowScheduleAction_Cleared;
     }
 
-    if (committed) {
-        return ShowScheduleAction_Ignored;
-    }
-
     if (schedule_id == _show_schedule_id) {
-        // A drift correction of the start this drone holds; the schedule may
-        // also have been refused or taken over by the RC switch meanwhile
-        if (_start_time_on_show_clock_usec == 0) {
+        if (_start_time_on_show_clock_usec > 0 && !_start_time_on_show_clock_committed) {
+            // A drift correction of the start this drone holds
+            if (_show_clock.is_valid()) {
+                _set_start_time_on_show_clock(start_cluster_usec);
+            }
+            return ShowScheduleAction_Scheduled;
+        }
+        // Committed, refused, taken over by the RC switch, or a repetition
+        // in the old timebase of a start that a timebase step dropped
+        if (_dropped_start_cluster_usec == 0 || start_cluster_usec == _dropped_start_cluster_usec) {
             return ShowScheduleAction_Ignored;
         }
-        if (_show_clock.is_valid()) {
-            _set_start_time_on_show_clock(start_cluster_usec);
-        }
-        return ShowScheduleAction_Scheduled;
     }
 
-    if (!_is_safe_to_change_start_time_in_current_stage()) {
-        return ShowScheduleAction_Ignored;
+    if (committed) {
+        // The ground never moves a committed start, so a new schedule means
+        // that this drone missed the abort that came before it
+        write_show_schedule_log_message(_show_schedule_id, _start_time_on_show_clock_usec, ShowScheduleAction_Aborted);
+        clear_scheduled_start_time(/* force = */ true);
+        gcs().send_text(MAV_SEVERITY_WARNING, "Show start aborted");
     }
 
     if (!_show_clock.is_valid()) {
@@ -253,6 +264,7 @@ ShowScheduleAction AC_DroneShowManager::_apply_show_schedule(uint16_t schedule_i
     }
 
     _show_schedule_id = schedule_id;
+    _dropped_start_cluster_usec = 0;
 
     const int64_t lead_usec = int64_t(_show_clock.show_to_local_usec(start_cluster_usec)) - int64_t(AP_HAL::micros64());
     if (lead_usec <= SHOW_CLOCK_COMMIT_BEFORE_START_USEC) {

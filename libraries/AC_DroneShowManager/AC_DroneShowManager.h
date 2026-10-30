@@ -869,6 +869,11 @@ private:
     // ID of the last show schedule acted upon, zero if none
     uint16_t _show_schedule_id;
 
+    // Start of that schedule if a show clock timebase step dropped it, zero
+    // otherwise; repetitions of it in the old timebase are ignored until the
+    // ground sends it in the new one
+    uint64_t _dropped_start_cluster_usec;
+
     // Last show schedule log entry, to log changes only
     struct {
         uint16_t schedule_id;
@@ -1178,9 +1183,9 @@ private:
     // clock must be valid.
     void _set_start_time_on_show_clock(uint64_t start_cluster_usec);
 
-    // Returns whether the scheduled start can only be aborted: a show clock
+    // Returns whether the scheduled start can no longer be moved: a show clock
     // start after its commit, or a start on the internal clock (RC switch or
-    // countdown), until the start has passed on the ground
+    // countdown), until the end of the show
     bool _is_start_time_committed() const;
 
     // Re-derives the internal start time from the show clock start time until

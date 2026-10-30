@@ -185,10 +185,22 @@ def main() -> int:
         e = rig.fresh_echo()
         check("committed at T-10", e.schedule_id == 5 and e.flags & COMMITTED and abs(e.start - start5) < 2000, f"{e} off {e.start - start5} us")
 
-        rig.schedule(6, start5 + 3_000_000)
+        rig.schedule(5, start5 + 2_000_000)
         e = rig.fresh_echo()
-        check("move after commit ignored", e.schedule_id == 5 and e.flags & COMMITTED and abs(e.start - start5) < 2000, f"{e}")
+        check("re-send of the committed id ignored", e.schedule_id == 5 and e.flags & COMMITTED and abs(e.start - start5) < 2000, f"{e}")
 
+        # The ground never moves a committed start: a new id means an abort
+        # this drone missed, followed by a new start
+        start6 = start5 + 8_000_000
+        rig.schedule(6, start6)
+        e = rig.fresh_echo()
+        check("new id after the commit: aborted, then the new start taken", e.schedule_id == 6 and e.flags & HAS_START and e.start == start6, f"{e}")
+        check("that abort reported", any("aborted" in t for t in rig.texts), f"{rig.texts[-3:]}")
+        time.sleep(max(0.0, (start6 - rig.cluster_us()) / 1e6 - 9.0))
+        e = rig.fresh_echo()
+        check("the new start commits", e.schedule_id == 6 and e.flags & COMMITTED, f"{e}")
+
+        rig.texts.clear()
         rig.schedule(7, 0)
         e = rig.fresh_echo()
         check("abort after commit", e.schedule_id == 7 and not e.flags & HAS_START, f"{e}")
@@ -201,7 +213,10 @@ def main() -> int:
         rig.cluster_offset -= 500.0  # cluster restart: time drops by 500 s
         time.sleep(1.5)
         e = rig.fresh_echo()
-        check("timebase step drops an uncommitted start", e.schedule_id == 0 and not e.flags & HAS_START and e.flags & CLOCK_VALID, f"{e}")
+        check("timebase step drops an uncommitted start", e.schedule_id == 8 and not e.flags & HAS_START and e.flags & CLOCK_VALID, f"{e}")
+        rig.schedule(8, start8)
+        e = rig.fresh_echo()
+        check("repetition in the old timebase ignored", e.schedule_id == 8 and not e.flags & HAS_START, f"{e}")
         start8b = rig.cluster_us() + 40_000_000
         rig.schedule(8, start8b)
         e = rig.fresh_echo()

@@ -355,8 +355,8 @@ bool AC_DroneShowManager::_handle_show_clock_packet(void* data, uint8_t length)
         _is_safe_to_change_start_time_in_current_stage()
     ) {
         write_show_schedule_log_message(_show_schedule_id, _start_time_on_show_clock_usec, ShowScheduleAction_TimebaseStep);
+        _dropped_start_cluster_usec = _start_time_on_show_clock_usec;
         clear_scheduled_start_time(/* force = */ true);
-        _show_schedule_id = 0;
     }
 
     return true;

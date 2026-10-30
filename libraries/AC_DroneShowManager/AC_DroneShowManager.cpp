@@ -43,6 +43,7 @@ AC_DroneShowManager::AC_DroneShowManager() :
     _start_time_on_show_clock_usec(0),
     _start_time_on_show_clock_committed(false),
     _show_schedule_id(0),
+    _dropped_start_cluster_usec(0),
     _last_show_schedule_log(),
     _stage_in_drone_show_mode(DroneShow_Off),
     _trajectory_is_circular(false),
@@ -476,6 +477,12 @@ void AC_DroneShowManager::handle_rc_start_switch()
 {
     if (_are_rc_switches_blocked())
     {
+        return;
+    }
+
+    // Drones whose switch is blocked or out of range would keep the committed
+    // start while the others move it
+    if (_start_time_on_show_clock_usec > 0 && _start_time_on_show_clock_committed) {
         return;
     }
 
