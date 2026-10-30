@@ -60,7 +60,14 @@ enum DroneShowPreflightCheckFlag {
     DroneShowPreflightCheck_ShowNotConfiguredYet = (1 << 0),
     // Flags from this point onwards are sent in the dedicated four bits of the
     // status packet
+    DroneShowPreflightCheck_BadEstimateOnPad = (1 << 6),
     DroneShowPreflightCheck_NotAtTakeoffPosition = (1 << 7),
+};
+
+// Flags telling which part of the pad check failed
+enum DroneShowPadCheckFailure {
+    DroneShowPadCheck_Speed = (1 << 0),
+    DroneShowPadCheck_Height = (1 << 1),
 };
 
 // Light effect type when the lights are driven from the GCS

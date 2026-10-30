@@ -62,6 +62,8 @@ AC_DroneShowManager::AC_DroneShowManager() :
     
     _init_ok = ok;
 
+    _reset_pad_check();
+
     // Don't call _update_rgb_led_instance() or _update_pyro_device_instance()
     // here, servo framework is not set up yet
 }
@@ -548,6 +550,9 @@ void AC_DroneShowManager::update()
         _check_changes_in_parameters();
         _check_events();
         _check_radio_failsafe();
+        if (_stage_in_drone_show_mode == DroneShow_WaitForStartTime) {
+            _sample_pad_estimate();
+        }
         _update_preflight_check_result();
         _trigger_show_events();
         _update_lights();
@@ -706,6 +711,7 @@ void AC_DroneShowManager::_update_preflight_check_result(bool force)
     if (_stage_in_drone_show_mode != DroneShow_WaitForStartTime) {
         /* We are not in the "waiting for start time" stage so we don't perform
          * any checks */
+        _reset_pad_check();
         return;
     }
 
@@ -719,6 +725,11 @@ void AC_DroneShowManager::_update_preflight_check_result(bool force)
 
     if (_tentative_show_coordinate_system.is_valid() && !_is_at_takeoff_position_xy()) {
         _preflight_check_failures |= DroneShowPreflightCheck_NotAtTakeoffPosition;
+    }
+
+    _update_pad_check();
+    if (_pad_check.failures) {
+        _preflight_check_failures |= DroneShowPreflightCheck_BadEstimateOnPad;
     }
 }
 

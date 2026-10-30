@@ -225,6 +225,24 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("TAKEOFF_ERR", 15, AC_DroneShowManager, _params.max_xy_placement_error_m, DEFAULT_XY_PLACEMENT_ERROR_METERS),
 
+    // @Param: PAD_SPD_ERR
+    // @DisplayName: Maximum estimated speed on the pad
+    // @Description: The drone is at rest on its pad before takeoff. If the speed of the estimated velocity, averaged over one second, exceeds this value at the takeoff time, the takeoff is refused. Zero to turn off the check.
+    // @Range: 0 2
+    // @Increment: 0.05
+    // @Units: m/s
+    // @User: Standard
+    AP_GROUPINFO("PAD_SPD_ERR", 47, AC_DroneShowManager, _params.max_pad_speed_error_m_s, DEFAULT_MAX_PAD_SPEED_ERROR_METERS_PER_SEC),
+
+    // @Param: PAD_Z_ERR
+    // @DisplayName: Maximum estimated height error on the pad
+    // @Description: If the estimated height relative to the takeoff position, averaged over one second, differs from zero by more than this value at the takeoff time, the takeoff is refused. In shows without an AMSL reference the takeoff position is relative to home, which is reset to the current position 10 seconds before takeoff and at arming. Zero to turn off the check.
+    // @Range: 0 5
+    // @Increment: 0.05
+    // @Units: m
+    // @User: Standard
+    AP_GROUPINFO("PAD_Z_ERR", 48, AC_DroneShowManager, _params.max_pad_height_error_m, DEFAULT_MAX_PAD_HEIGHT_ERROR_METERS),
+
     // @Param: SYNC_MODE
     // @DisplayName: Time synchronization mode
     // @Description: Time synchronization mode to use when starting the show
@@ -368,7 +386,7 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MAX_ESC_ERR", 39, AC_DroneShowManager, _params.max_esc_error_rate_pcnt, DEFAULT_MAX_ESC_ERROR_RATE_PCNT),
 
-    // Currently used max parameter ID: 40; update this if you add more parameters.
+    // Currently used max parameter ID: 48; update this if you add more parameters.
     // Note that the max parameter ID may appear in the middle of the above list.
 
     AP_GROUPEND

@@ -31,6 +31,15 @@
 // take off if it is placed farther than this distance from its takeoff position.
 #define DEFAULT_XY_PLACEMENT_ERROR_METERS 3.0f
 
+// Default limit of the mean estimated speed on the pad before takeoff, in
+// meters per second. The drone is at rest there; a healthy estimate stays
+// within a few centimeters per second.
+#define DEFAULT_MAX_PAD_SPEED_ERROR_METERS_PER_SEC 0.2f
+
+// Default limit of the mean estimated height relative to the takeoff position
+// before takeoff, in meters.
+#define DEFAULT_MAX_PAD_HEIGHT_ERROR_METERS 0.3f
+
 // Default horizontal trajectory drift tolerance level, in meters.
 #define DEFAULT_MAX_XY_DRIFT_METERS 3.0f
 

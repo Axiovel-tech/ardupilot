@@ -6,6 +6,7 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_Common/Location.h>
 #include <AP_Math/AP_Math.h>
+#include <AP_NavEKF/AP_Nav_Common.h>
 #include <AP_Notify/RGBLed.h>
 #include <AP_Param/AP_Param.h>
 
@@ -421,7 +422,8 @@ public:
 
     // Returns whether the drone is prepared to take off. This function provides
     // valid results only if the drone is in the "waiting for start time" stage;
-    // otherwise it returns false unconditionally.
+    // otherwise it returns false unconditionally. The pad check is left out:
+    // it is enforced by notify_takeoff_attempt() only.
     bool is_prepared_to_take_off() const;
 
     // Returns whether we are feeding desired velocity information into the
@@ -455,6 +457,8 @@ public:
 
     // Notifies the drone show manager that the takeoff is about to take place.
     // The drone show manager may decide to cancel the takeoff by returning false.
+    // A failed pad check cancels the takeoff instead of delaying it, because a
+    // late takeoff would be out of sync with the rest of the show.
     bool notify_takeoff_attempt() WARN_IF_UNUSED;
 
     // Handler for the MAVLink CMD_USER1 message that allows the user to reload _or_ clear the show
@@ -624,6 +628,12 @@ private:
         // Maximum allowed placement error before takeoff in the XY plane, in meters.
         AP_Float max_xy_placement_error_m;
 
+        // Maximum allowed mean estimated speed on the pad before takeoff, in meters per second.
+        AP_Float max_pad_speed_error_m_s;
+
+        // Maximum allowed mean estimated height relative to the takeoff position before takeoff, in meters.
+        AP_Float max_pad_height_error_m;
+
         // Maximum allowed distance between expected position and setpoint in the XY plane during show, in meters.
         AP_Float max_xy_drift_during_show_m;
 
@@ -744,6 +754,26 @@ private:
     // from _update_preflight_check_result(). See the values from the
     // DroneShowPreflightCheckFlag enum for more details.
     uint8_t _preflight_check_failures;
+
+    // Estimate samples collected on the pad since the last pad check, per
+    // EKF lane, while waiting for the start time
+    struct {
+        Vector3f velocity_sum;  // NED, m/s
+        float max_speed;        // m/s
+        uint16_t velocity_count;
+        float height_sum;       // relative to the takeoff position, m
+        uint16_t height_count;
+    } _pad_samples[MAX_EKF_CORES];
+
+    // Result of the last pad check, from its worst lane
+    struct {
+        float speed;            // speed of the mean velocity, m/s
+        float max_speed;        // largest sampled speed, m/s
+        float height_error;     // mean height relative to the takeoff position, m; NaN if unknown
+        uint8_t failures;       // see DroneShowPadCheckFailure
+        uint8_t lane;           // EKF lane
+        bool has_samples;       // false until a window with samples has been checked
+    } _pad_check;
 
     // Properties of the drone show coordinate system, used in-flight. Updated
     // from the parameters set by the user when the drone takes off.
@@ -1043,6 +1073,18 @@ private:
     // Recalculates the values of some internal variables that are derived from
     // the current trajectory when it is loaded.
     bool _recalculate_trajectory_properties() WARN_IF_UNUSED;
+
+    // Clears the pad samples and the result of the last pad check
+    void _reset_pad_check();
+
+    // Samples the estimated velocity and the estimated height relative to the
+    // takeoff position of every EKF3 lane, or of the AHRS if EKF3 is not in
+    // use. Called at 25 Hz while waiting for the start time.
+    void _sample_pad_estimate();
+
+    // Checks the pad samples collected since the last call against the
+    // thresholds and starts a new sampling window
+    void _update_pad_check();
 
     // Requests the vehicle to switch to drone show mode.
     virtual void _request_switch_to_show_mode() {};
