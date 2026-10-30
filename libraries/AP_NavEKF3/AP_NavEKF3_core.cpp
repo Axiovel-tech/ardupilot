@@ -25,6 +25,13 @@ bool NavEKF3_core::setup_core(uint8_t _imu_index, uint8_t _core_index)
     accel_index_active = imu_index;
     core_index = _core_index;
 
+    const uint8_t avgMask = frontend->_accAvgMask;
+    accelAvg.enabled = __builtin_popcount(avgMask) == 2 && (avgMask & (1U<<imu_index)) && avgMask < (1U<<INS_MAX_INSTANCES);
+    if (accelAvg.enabled) {
+        accelAvg.imu[0] = __builtin_ctz(avgMask);
+        accelAvg.imu[1] = __builtin_ctz(avgMask & ~(1U<<accelAvg.imu[0]));
+    }
+
     /*
       The imu_buffer_length needs to cope with the worst case sensor delay at the
       target EKF state prediction rate. Non-IMU data coming in faster is downsampled.
@@ -335,6 +342,14 @@ void NavEKF3_core::InitialiseVariables()
     imuDataDownSampledNew.delVelDT = 0.0f;
     imuDataDownSampledNew.gyro_index = gyro_index_active;
     imuDataDownSampledNew.accel_index = accel_index_active;
+    accelAvg.solo = -1;
+    accelAvg.fade = 1;
+    accelAvg.diff.zero();
+    accelAvg.heldDiff.zero();
+    accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
+    accelAvg.offset.zero();
+    accelAvg.faulted = 0;
+    accelAvg.disagree = false;
     runUpdates = false;
     framesSincePredict = 0;
     gpsYawResetRequest = false;
@@ -512,7 +527,7 @@ bool NavEKF3_core::InitialiseFilterBootstrap(void)
     Vector3F initAccVec;
 
     // TODO we should average accel readings over several cycles
-    initAccVec = dal.ins().get_accel(accel_index_active).toftype();
+    initAccVec = filteredAccel();
 
     // normalise the acceleration vector
     ftype pitch=0, roll=0;
