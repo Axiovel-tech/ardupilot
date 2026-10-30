@@ -129,6 +129,7 @@ void NavEKF3_core::Log_Write_XKAV(uint64_t time_us) const
         solo    : int8_t(accelAvg.solo < 0 ? -1 : accelAvg.imu[accelAvg.solo]),
         fade    : float(accelAvg.fade),
         faulted : faulted,
+        bias_floor : float(averagedAccelBiasFloor()),
     };
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }
