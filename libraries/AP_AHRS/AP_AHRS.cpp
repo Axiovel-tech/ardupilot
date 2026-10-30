@@ -783,8 +783,19 @@ void AP_AHRS::update_EKF3(void)
             Vector3f &abias = state.accel_bias;
             EKF3.getAccelBias(-1,abias);
 
-            // use the primary IMU for accel earth frame
-            Vector3f accel = _ins.get_accel(primary_accel);
+            // use the accel the primary EKF uses for accel earth frame
+            Vector3f accel;
+            NavEKF3::AccelAverage accel_average;
+            if (EKF3.getAccelAverage(-1, accel_average)) {
+                accel = accel_average.offset;
+                for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
+                    if (is_positive(accel_average.weight[i])) {
+                        accel += _ins.get_accel(i) * accel_average.weight[i];
+                    }
+                }
+            } else {
+                accel = _ins.get_accel(primary_accel);
+            }
             accel -= abias;
             state.accel_ef = state.dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
 
@@ -2661,6 +2672,8 @@ void AP_AHRS::_getCorrectedDeltaVelocityNED(Vector3f& ret, float& dt) const
 {
     int8_t imu_idx = -1;
     Vector3f accel_bias;
+    NavEKF3::AccelAverage accel_average;
+    bool averaged = false;
     switch (active_EKF_type()) {
 #if AP_AHRS_DCM_ENABLED
     case EKFType::DCM:
@@ -2676,6 +2689,7 @@ void AP_AHRS::_getCorrectedDeltaVelocityNED(Vector3f& ret, float& dt) const
     case EKFType::THREE:
         imu_idx = EKF3.getPrimaryCoreIMUIndex();
         EKF3.getAccelBias(-1,accel_bias);
+        averaged = EKF3.getAccelAverage(-1, accel_average);
         break;
 #endif
 #if AP_AHRS_SIM_ENABLED
@@ -2692,7 +2706,21 @@ void AP_AHRS::_getCorrectedDeltaVelocityNED(Vector3f& ret, float& dt) const
         AP::ins().get_delta_velocity(ret, dt);
         return;
     }
-    AP::ins().get_delta_velocity((uint8_t)imu_idx, ret, dt);
+    if (averaged) {
+        Vector3f accel = accel_average.offset;
+        dt = 0;
+        for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
+            Vector3f dv;
+            float dv_dt;
+            if (is_positive(accel_average.weight[i]) && AP::ins().get_delta_velocity(i, dv, dv_dt) && is_positive(dv_dt)) {
+                accel += dv * (accel_average.weight[i] / dv_dt);
+                dt += dv_dt * accel_average.weight[i];
+            }
+        }
+        ret = accel * dt;
+    } else {
+        AP::ins().get_delta_velocity((uint8_t)imu_idx, ret, dt);
+    }
     ret -= accel_bias*dt;
     ret = state.dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * ret;
     ret.z += GRAVITY_MSS*dt;
