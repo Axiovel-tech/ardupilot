@@ -303,6 +303,10 @@ public:
     // Returns the takeoff speed in meters per second
     float get_takeoff_speed_m_sec() const;
 
+    // Returns the time that the takeoff time of the show allows for climbing
+    // to the takeoff altitude, in seconds
+    float get_planned_takeoff_climb_time_sec() const;
+
     // Returns the number of seconds left until show start, in microseconds
     int64_t get_time_until_start_usec() const;
 

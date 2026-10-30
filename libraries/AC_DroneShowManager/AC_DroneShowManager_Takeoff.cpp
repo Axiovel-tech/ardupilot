@@ -45,6 +45,15 @@ float AC_DroneShowManager::get_takeoff_speed_m_sec() const {
     return result;
 }
 
+float AC_DroneShowManager::get_planned_takeoff_climb_time_sec() const
+{
+    // same as in the takeoff time calculation of the trajectory stats
+    const float result = sb_get_travel_time_for_distance(
+        get_takeoff_altitude_cm() / 100.0f, get_takeoff_speed_m_sec(), get_takeoff_acceleration_m_ss()
+    );
+    return isfinite(result) ? result : 0;
+}
+
 float AC_DroneShowManager::get_time_until_takeoff_sec()
 {
     if (isnan(_projected_wall_clock_time_at_takeoff_sec)) {
