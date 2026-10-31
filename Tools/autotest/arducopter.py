@@ -16698,6 +16698,13 @@ return update, 1000
             "rise": 1.0,
             "decay": 30.0,
         },
+        "al005": {
+            "idle": (-0.01, 0.14),
+            "peak": (-0.05, 0.42),
+            "final": (0.00, 0.12),
+            "rise": 1.0,
+            "decay": 20.0,
+        },
     }
 
     def accel_offsets(self, profile, events, t):
@@ -16872,7 +16879,7 @@ return update, 1000
         ]
         windows = [(-6, 0), (0, 10), (10, 60)]
         results = []
-        for profile in "none", "drone2", "al011":
+        for profile in "none", "drone2", "al011", "al005":
             for (name, params) in configs:
                 self.start_subtest("%s, %s" % (profile, name))
                 self.context_push()
@@ -16895,12 +16902,13 @@ return update, 1000
                 switches, vel_rms, "/".join(["%.2f" % f for f in floors])))
 
         heights = {(profile, name): [h for (h, v) in maxima] for (profile, name, maxima, switches, vel_rms, floors) in results}
-        for profile in "drone2", "al011":
+        for profile in "drone2", "al011", "al005":
             for (window, single, averaged, floored) in zip(["pad", "takeoff", "hover"],
                                                            heights[(profile, "IMU0 lane")],
                                                            heights[(profile, "averaged lane")],
                                                            heights[(profile, "averaged, DIFF 0.25")]):
-                if averaged > single:
+                # with a clean IMU0 (al005) averaging costs a little; only the bound applies
+                if profile != "al005" and averaged > single:
                     raise NotAchievedException("%s %s: averaged lane worse than IMU0 lane" % (profile, window))
                 if floored > 0.2:
                     raise NotAchievedException("%s %s: averaged lane with EK3_ABIAS_DIFF height error %.2fm" % (profile, window, floored))
@@ -16916,7 +16924,7 @@ return update, 1000
         ]
         windows = [(0, 3), (3, 10), (10, 30), (30, 60)]
         results = []
-        for profile in "none", "drone2", "al011":
+        for profile in "none", "drone2", "al011", "al005":
             for (name, params) in configs:
                 self.context_push()
                 self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, **params})
