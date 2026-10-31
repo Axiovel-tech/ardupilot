@@ -16839,17 +16839,36 @@ return update, 1000
         for (start, end) in windows:
             w = (ekf_t >= events["lift"] + start) & (ekf_t < events["lift"] + end)
             maxima.append((numpy.max(numpy.abs(height_error[w])), numpy.max(numpy.abs(vel_error[w & ~ground_held]))))
+        self.last_hover_vel_rms = numpy.sqrt(numpy.mean(vel_error[ekf_t >= events["lift"] + 20] ** 2))
         return maxima, switches
+
+    def averaged_accel_bias_floor(self, logpath, events, windows):
+        '''largest XKAV.ZBU of core 0 in each window (seconds after the takeoff command)'''
+        dfreader = self.dfreader_for_path(logpath)
+        ret = [0.0 for w in windows]
+        while True:
+            m = dfreader.recv_match(type="XKAV")
+            if m is None:
+                break
+            if m.C != 0:
+                continue
+            t = m.TimeUS * 1e-6 - events["lift"]
+            for (i, (start, end)) in enumerate(windows):
+                if start <= t < end:
+                    ret[i] = max(ret[i], m.ZBU)
+        return ret
 
     def EK3AccelAverageOffsets(self):
         '''compare an averaged-accel EKF3 lane with single and dual IMU lanes under mirrored, decaying IMU offsets'''
+        # motors-on accel noise, so the bias floor is shown not to open on it
+        noise = {"SIM_ACC1_RND": 3, "SIM_ACC2_RND": 3}
+        quiet = {"SIM_ACC1_RND": 0, "SIM_ACC2_RND": 0}
         configs = [
-            ("IMU0 lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 0, "EK3_ABIAS_TKO": 0}),
-            ("IMU0 + IMU1 lanes", {"EK3_IMU_MASK": 3, "EK3_ACC_AVG": 0, "EK3_ABIAS_TKO": 0}),
-            ("averaged lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_TKO": 0}),
-            ("averaged, TKO 0.1", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_TKO": 0.1}),
-            ("averaged, TKO 0.2", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_TKO": 0.2}),
-            ("IMU0, TKO 0.1", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 0, "EK3_ABIAS_TKO": 0.1}),
+            ("IMU0 lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 0, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("IMU0 + IMU1 lanes", {"EK3_IMU_MASK": 3, "EK3_ACC_AVG": 0, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("averaged lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("averaged, DIFF 0.25", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25, **quiet}),
+            ("avg, DIFF 0.25, noise", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25, **noise}),
         ]
         windows = [(-6, 0), (0, 10), (10, 60)]
         results = []
@@ -16864,26 +16883,71 @@ return update, 1000
                 logpath = self.current_onboard_log_filepath()
                 self.context_pop()
                 maxima, switches = self.ekf_vertical_errors(logpath, events, windows)
-                results.append((profile, name, maxima, switches))
+                floors = self.averaged_accel_bias_floor(logpath, events, windows)
+                results.append((profile, name, maxima, switches, self.last_hover_vel_rms, floors))
 
         self.progress("Max |height error| (m) / max |VD error| (m/s), primary EKF3 lane vs truth")
-        self.progress("%-7s %-18s %-13s %-13s %-13s %s" % ("profile", "EKF3 lanes", "pad", "takeoff 0-10s", "hover 10-60s", "switches"))
-        for (profile, name, maxima, switches) in results:
-            self.progress("%-7s %-18s %s %u" % (
+        self.progress("%-7s %-22s %-13s %-13s %-13s %-8s %-9s %s" % ("profile", "EKF3 lanes", "pad", "takeoff 0-10s", "hover 10-60s", "switches", "VDrms20+", "max ZBU pad/tko/hover"))
+        for (profile, name, maxima, switches, vel_rms, floors) in results:
+            self.progress("%-7s %-22s %s %-8u %-9.3f %s" % (
                 profile, name,
                 " ".join(["%5.2f / %4.2f  " % (h, v) for (h, v) in maxima]),
-                switches))
+                switches, vel_rms, "/".join(["%.2f" % f for f in floors])))
 
-        heights = {(profile, name): [h for (h, v) in maxima] for (profile, name, maxima, switches) in results}
+        heights = {(profile, name): [h for (h, v) in maxima] for (profile, name, maxima, switches, vel_rms, floors) in results}
         for profile in "drone2", "al011":
-            for (window, single, averaged, tko) in zip(["pad", "takeoff", "hover"],
-                                                       heights[(profile, "IMU0 lane")],
-                                                       heights[(profile, "averaged lane")],
-                                                       heights[(profile, "averaged, TKO 0.1")]):
+            for (window, single, averaged, floored) in zip(["pad", "takeoff", "hover"],
+                                                           heights[(profile, "IMU0 lane")],
+                                                           heights[(profile, "averaged lane")],
+                                                           heights[(profile, "averaged, DIFF 0.25")]):
                 if averaged > single:
                     raise NotAchievedException("%s %s: averaged lane worse than IMU0 lane" % (profile, window))
-                if tko > 0.2:
-                    raise NotAchievedException("%s %s: averaged lane with EK3_ABIAS_TKO height error %.2fm" % (profile, window, tko))
+                if floored > 0.2:
+                    raise NotAchievedException("%s %s: averaged lane with EK3_ABIAS_DIFF height error %.2fm" % (profile, window, floored))
+        for (profile, name, maxima, switches, vel_rms, floors) in results:
+            if profile == "none" and max(floors) > 0.01:
+                raise NotAchievedException("bias floor opened without IMU offsets moving (%s: %s)" % (name, str(floors)))
+
+    def EK3AccelAverageUwbStep(self):
+        '''averaged-accel EKF3 lane: with a UWB height error that clears during the take-off, the bias floor stays shut while the IMU offsets are steady and still learns an offset that moves'''
+        configs = [
+            ("averaged lane", {"EK3_ABIAS_DIFF": 0}),
+            ("averaged, DIFF 0.25", {"EK3_ABIAS_DIFF": 0.25}),
+        ]
+        windows = [(0, 3), (3, 10), (10, 30), (30, 60)]
+        results = []
+        for profile in "none", "drone2", "al011":
+            for (name, params) in configs:
+                self.context_push()
+                self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, **params})
+                # height reads 0.3 m low near the floor and corrects itself
+                # 1.5 s into the climb
+                self.set_parameter("SIM_VICON_GLIT_Z", 0.3)
+                events = {}
+                self.install_accel_offset_profile(profile, events)
+                actions = {1.5: lambda: self.send_set_parameter_direct("SIM_VICON_GLIT_Z", 0)}
+                self.fly_pad_takeoff_hover(events, hover_time=60, actions=actions)
+                logpath = self.current_onboard_log_filepath()
+                self.context_pop()
+                maxima, switches = self.ekf_vertical_errors(logpath, events, windows)
+                floors = self.averaged_accel_bias_floor(logpath, events, windows)
+                results.append((profile, name, maxima, floors))
+        # heights are relative to arming, when the estimate followed the
+        # low height, so a correct estimate shows 0.3 m once it has cleared
+        self.progress("Max |height error| (m) / max |VD error| (m/s); UWB height 0.3 m low until 1.5 s into the climb")
+        for (profile, name, maxima, floors) in results:
+            self.progress("%-7s %-20s %s ZBU %s" % (
+                profile, name, " ".join(["%5.2f / %4.2f " % (h, v) for (h, v) in maxima]),
+                "/".join(["%.2f" % f for f in floors])))
+
+        by_name = {(profile, name): (maxima, floors) for (profile, name, maxima, floors) in results}
+        (floored, floors) = by_name[("none", "averaged, DIFF 0.25")]
+        if max(floors) > 0.01:
+            raise NotAchievedException("bias floor opened without IMU offsets moving: %s" % str(floors))
+        (plain, plain_floors) = by_name[("al011", "averaged lane")]
+        (floored, floors) = by_name[("al011", "averaged, DIFF 0.25")]
+        if floored[2][0] > plain[2][0]:
+            raise NotAchievedException("bias floor did not learn the AL-011 offset (%.2f vs %.2f m)" % (floored[2][0], plain[2][0]))
 
     def EK3AccelAverageFailover(self):
         '''averaged-accel EKF3 lane: IMU dropouts, rejoining and clipping cause no step'''
@@ -17005,7 +17069,7 @@ return update, 1000
         self.reboot_sitl()
 
     def test_replay_accel_average_bit(self):
-        self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_TKO": 0.1}, replay=True)
+        self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25}, replay=True)
         self.set_parameters({
             "SIM_ACC_FAIL_MSK": 0,
             "SIM_ACCEL2_FAIL": 0,
@@ -17177,6 +17241,7 @@ return update, 1000
             self.EKF3SRCPerCore,
             self.EK3AccelAverageOffsets,
             self.EK3AccelAverageFailover,
+            self.EK3AccelAverageUwbStep,
             self.EK3AccelAverageDisagree,
             self.EK3AccelAveragePrearm,
         ])
