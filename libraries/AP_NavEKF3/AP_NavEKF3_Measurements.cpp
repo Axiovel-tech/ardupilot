@@ -571,6 +571,8 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
 {
     const auto &ins = dal.ins();
     const ftype diffTau = 0.25;         // s
+    // longer than the Z accel bias takes to converge once its variance is raised
+    const ftype diffSlowTau = 5.0;      // s
     const ftype fadeTime = 3.0;         // s
     const ftype disagreeLimit = 1.0;    // m/s/s
 
@@ -603,6 +605,7 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
     if (faulted == 0) {
         if (!clipping[0] && !clipping[1]) {
             accelAvg.diff += (accel[1] - accel[0] - accelAvg.diff) * (dtIMUavg / (dtIMUavg + diffTau));
+            accelAvg.diffSlowZ += (accelAvg.diff.z - accelAvg.diffSlowZ) * (dtIMUavg / (dtIMUavg + diffSlowTau));
         }
         if (accelAvg.solo >= 0) {
             accelAvg.fade += dtIMUavg / fadeTime;
