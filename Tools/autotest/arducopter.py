@@ -12385,6 +12385,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             ('BodyOdom', self.test_replay_body_odom_bit),
             ('Beacon', self.test_replay_beacon_bit),
             ('OpticalFlow', self.test_replay_optical_flow_bit),
+            ('AccelAverage', self.test_replay_accel_average_bit),
         ]
         for (name, func) in bits:
             self.start_subtest("%s" % name)
@@ -16669,6 +16670,429 @@ return update, 1000
             if pname in all_params:
                 raise ValueError(f"{pname} in fetched-all-parameters when it should have gone away")
 
+    # body-frame vertical accel offsets (m/s/s) of IMU0 and IMU1 while the
+    # motors spin: on the pad (idle), at lift-off (peak) and late in the hover
+    # (final). Offsets move towards idle with time constant "rise" after
+    # arming, towards peak with "rise" after lift-off, and decay from peak to
+    # final with time constant "decay". From the 2026-10-30 drone 2 flight
+    # and AL-011 show A.
+    ACCEL_OFFSET_PROFILES = {
+        "none": {
+            "idle": (0, 0),
+            "peak": (0, 0),
+            "final": (0, 0),
+            "rise": 1.0,
+            "decay": 30.0,
+        },
+        "drone2": {
+            "idle": (-0.10, 0.25),
+            "peak": (-0.40, 0.70),
+            "final": (-0.12, 0.12),
+            "rise": 1.0,
+            "decay": 30.0,
+        },
+        "al011": {
+            "idle": (-0.13, 0.18),
+            "peak": (-0.80, 0.39),
+            "final": (-0.80, 0.39),
+            "rise": 1.0,
+            "decay": 30.0,
+        },
+        "al005": {
+            "idle": (-0.01, 0.14),
+            "peak": (-0.05, 0.42),
+            "final": (0.00, 0.12),
+            "rise": 1.0,
+            "decay": 20.0,
+        },
+    }
+
+    def accel_offsets(self, profile, events, t):
+        '''return the IMU0 and IMU1 Z accel offsets of profile at sim time t'''
+        p = self.ACCEL_OFFSET_PROFILES[profile]
+        t_arm = events.get("arm")
+        t_lift = events.get("lift")
+
+        def rise(dt):
+            return 1 - math.exp(-dt / p["rise"])
+
+        ret = []
+        for i in range(2):
+            idle = 0.0
+            if t_arm is not None and t >= t_arm:
+                idle = p["idle"][i] * rise(t - t_arm)
+            if t_lift is None or t < t_lift:
+                ret.append(idle)
+                continue
+            dt = t - t_lift
+            target = p["final"][i] + (p["peak"][i] - p["final"][i]) * math.exp(-dt / p["decay"])
+            ret.append(idle + (target - idle) * rise(dt))
+        return ret
+
+    def install_accel_offset_profile(self, profile, events):
+        '''drive SIM_ACC1_BIAS_Z and SIM_ACC2_BIAS_Z through profile; events
+        gets the sim times of arming ("arm") and of the takeoff command ("lift")'''
+        self.set_parameters({
+            "SIM_ACC1_BIAS_Z": 0,
+            "SIM_ACC2_BIAS_Z": 0,
+        })
+        last = [0]
+
+        def hook(mav, m):
+            if not hasattr(m, 'time_boot_ms'):
+                return
+            t = m.time_boot_ms * 1e-3
+            if t - last[0] < 0.05:
+                return
+            last[0] = t
+            z0, z1 = self.accel_offsets(profile, events, t)
+            self.send_set_parameter_direct("SIM_ACC1_BIAS_Z", z0)
+            self.send_set_parameter_direct("SIM_ACC2_BIAS_Z", z1)
+
+        self.install_message_hook_context(hook)
+
+    def setup_external_nav_like_revb(self, ekf_params, replay=False):
+        '''UWB-like external navigation for position and height, as on
+        AXIOLIGHT-REVB, at a speedup the accel offset profiles can follow'''
+        self.set_parameters({
+            "EK3_SRC1_POSXY": 6,
+            "EK3_SRC1_VELXY": 0,
+            "EK3_SRC1_POSZ": 6,
+            "EK3_SRC1_VELZ": 0,
+            "GPS1_TYPE": 0,
+            "VISO_TYPE": 1,
+            "VISO_POS_M_NSE": 0.1,
+            "VISO_ALT_M_NSE": 0.25,
+            "VISO_DELAY_MS": 20,
+            "SIM_VICON_P_SD": 0.05,
+            "SERIAL5_PROTOCOL": 2,
+            "WP_SPD_UP": 4,
+            "DISARM_DELAY": 0,
+            "LOG_REPLAY": int(replay),
+            "LOG_DISARMED": 0,
+            "LOG_DARM_RATEMAX": 0,
+            "LOG_FILE_RATEMAX": 0,
+        })
+        self.set_parameters(ekf_params)
+        self.customise_SITL_commandline(["--serial5=sim:vicon:"])
+        self.set_parameter("SIM_SPEEDUP", 10)
+        self.set_parameter("LOG_DISARMED", 1)
+        self.mav.mav.system_time_send(int(time.time() * 1000000), 0)
+        self.set_origin(self.sitl_start_location())
+
+    def fly_pad_takeoff_hover(self, events, pad_time=6, hover_time=60, actions=None):
+        '''arm in GUIDED, idle on the pad, take off to 1m and hover; actions
+        maps seconds after the takeoff command to callables'''
+        self.change_mode('GUIDED')
+        self.wait_ready_to_arm(require_absolute=False)
+        self.arm_vehicle()
+        events["arm"] = self.get_sim_time()
+        self.delay_sim_time(pad_time)
+        events["lift"] = self.get_sim_time()
+        self.run_cmd(mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, p7=1)
+        pending = sorted((actions or {}).items())
+        while True:
+            t = self.get_sim_time_cached() - events["lift"]
+            while len(pending) and t >= pending[0][0]:
+                pending.pop(0)[1]()
+            if t >= hover_time:
+                break
+            self.delay_sim_time(0.1)
+        self.change_mode('LAND')
+        self.wait_disarmed(timeout=60)
+
+    def ekf_vertical_errors(self, logpath, events, windows):
+        '''return the largest height and vertical velocity errors of the
+        primary EKF3 lane against the simulator in each window (seconds after
+        the takeoff command), height relative to its error at arming, and the
+        number of lane switches after arming'''
+        dfreader = self.dfreader_for_path(logpath)
+        t_arm = events["arm"]
+        primary = 0
+        switches = 0
+        sim = []
+        ekf = []
+        while True:
+            m = dfreader.recv_match(type=["SIM2", "XKF1", "XKF4"])
+            if m is None:
+                break
+            t = m.TimeUS * 1e-6
+            if m.get_type() == "SIM2":
+                sim.append((t, m.PD, m.VD))
+                continue
+            if m.C >= 100:
+                continue
+            if m.get_type() == "XKF4":
+                if m.PI != primary and t > t_arm:
+                    switches += 1
+                primary = m.PI
+            elif m.C == primary and t >= t_arm:
+                ekf.append((t, m.PD, m.VD))
+        sim_t, sim_pd, sim_vd = numpy.array(sim).T
+        # while thrust builds with the vehicle held on the ground the
+        # simulator's velocity and accelerations move but its position
+        # doesn't, then it releases the vehicle at that velocity; leave
+        # those moments out of the velocity error
+        held_t = sim_t[numpy.abs(sim_vd - numpy.gradient(sim_pd, sim_t)) > 0.1]
+        ekf_t, ekf_pd, ekf_vd = numpy.array(ekf).T
+        height_error = ekf_pd - numpy.interp(ekf_t, sim_t, sim_pd)
+        height_error -= height_error[0]
+        vel_error = ekf_vd - numpy.interp(ekf_t, sim_t, sim_vd)
+        ground_held = numpy.zeros(len(ekf_t), dtype=bool)
+        if len(held_t):
+            last_held = numpy.searchsorted(held_t, ekf_t, side='right') - 1
+            ground_held = (last_held >= 0) & (ekf_t - held_t[numpy.maximum(last_held, 0)] < 0.3)
+        maxima = []
+        for (start, end) in windows:
+            w = (ekf_t >= events["lift"] + start) & (ekf_t < events["lift"] + end)
+            maxima.append((numpy.max(numpy.abs(height_error[w])), numpy.max(numpy.abs(vel_error[w & ~ground_held]))))
+        self.last_hover_vel_rms = numpy.sqrt(numpy.mean(vel_error[ekf_t >= events["lift"] + 20] ** 2))
+        return maxima, switches
+
+    def averaged_accel_bias_floor(self, logpath, events, windows):
+        '''largest XKAV.ZBU of core 0 in each window (seconds after the takeoff command)'''
+        dfreader = self.dfreader_for_path(logpath)
+        ret = [0.0 for w in windows]
+        while True:
+            m = dfreader.recv_match(type="XKAV")
+            if m is None:
+                break
+            if m.C != 0:
+                continue
+            t = m.TimeUS * 1e-6 - events["lift"]
+            for (i, (start, end)) in enumerate(windows):
+                if start <= t < end:
+                    ret[i] = max(ret[i], m.ZBU)
+        return ret
+
+    def EK3AccelAverageOffsets(self):
+        '''compare an averaged-accel EKF3 lane with single and dual IMU lanes under mirrored, decaying IMU offsets'''
+        # motors-on accel noise, so the bias floor is shown not to open on it
+        noise = {"SIM_ACC1_RND": 3, "SIM_ACC2_RND": 3}
+        quiet = {"SIM_ACC1_RND": 0, "SIM_ACC2_RND": 0}
+        configs = [
+            ("IMU0 lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 0, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("IMU0 + IMU1 lanes", {"EK3_IMU_MASK": 3, "EK3_ACC_AVG": 0, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("averaged lane", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0, **quiet}),
+            ("averaged, DIFF 0.25", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25, **quiet}),
+            ("avg, DIFF 0.25, noise", {"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25, **noise}),
+        ]
+        windows = [(-6, 0), (0, 10), (10, 60)]
+        results = []
+        for profile in "none", "drone2", "al011", "al005":
+            for (name, params) in configs:
+                self.start_subtest("%s, %s" % (profile, name))
+                self.context_push()
+                self.setup_external_nav_like_revb(params)
+                events = {}
+                self.install_accel_offset_profile(profile, events)
+                self.fly_pad_takeoff_hover(events)
+                logpath = self.current_onboard_log_filepath()
+                self.context_pop()
+                maxima, switches = self.ekf_vertical_errors(logpath, events, windows)
+                floors = self.averaged_accel_bias_floor(logpath, events, windows)
+                results.append((profile, name, maxima, switches, self.last_hover_vel_rms, floors))
+
+        self.progress("Max |height error| (m) / max |VD error| (m/s), primary EKF3 lane vs truth")
+        self.progress("%-7s %-22s %-13s %-13s %-13s %-8s %-9s %s" % ("profile", "EKF3 lanes", "pad", "takeoff 0-10s", "hover 10-60s", "switches", "VDrms20+", "max ZBU pad/tko/hover"))
+        for (profile, name, maxima, switches, vel_rms, floors) in results:
+            self.progress("%-7s %-22s %s %-8u %-9.3f %s" % (
+                profile, name,
+                " ".join(["%5.2f / %4.2f  " % (h, v) for (h, v) in maxima]),
+                switches, vel_rms, "/".join(["%.2f" % f for f in floors])))
+
+        heights = {(profile, name): [h for (h, v) in maxima] for (profile, name, maxima, switches, vel_rms, floors) in results}
+        for profile in "drone2", "al011", "al005":
+            for (window, single, averaged, floored) in zip(["pad", "takeoff", "hover"],
+                                                           heights[(profile, "IMU0 lane")],
+                                                           heights[(profile, "averaged lane")],
+                                                           heights[(profile, "averaged, DIFF 0.25")]):
+                # with a clean IMU0 (al005) averaging costs a little; only the bound applies
+                if profile != "al005" and averaged > single:
+                    raise NotAchievedException("%s %s: averaged lane worse than IMU0 lane" % (profile, window))
+                if floored > 0.2:
+                    raise NotAchievedException("%s %s: averaged lane with EK3_ABIAS_DIFF height error %.2fm" % (profile, window, floored))
+        for (profile, name, maxima, switches, vel_rms, floors) in results:
+            if profile == "none" and max(floors) > 0.01:
+                raise NotAchievedException("bias floor opened without IMU offsets moving (%s: %s)" % (name, str(floors)))
+
+    def EK3AccelAverageUwbStep(self):
+        '''averaged-accel EKF3 lane: with a UWB height error that clears during the take-off, the bias floor stays shut while the IMU offsets are steady and still learns an offset that moves'''
+        configs = [
+            ("averaged lane", {"EK3_ABIAS_DIFF": 0}),
+            ("averaged, DIFF 0.25", {"EK3_ABIAS_DIFF": 0.25}),
+        ]
+        windows = [(0, 3), (3, 10), (10, 30), (30, 60)]
+        results = []
+        for profile in "none", "drone2", "al011", "al005":
+            for (name, params) in configs:
+                self.context_push()
+                self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, **params})
+                # height reads 0.3 m low near the floor and corrects itself
+                # 1.5 s into the climb
+                self.set_parameter("SIM_VICON_GLIT_Z", 0.3)
+                events = {}
+                self.install_accel_offset_profile(profile, events)
+                actions = {1.5: lambda: self.send_set_parameter_direct("SIM_VICON_GLIT_Z", 0)}
+                self.fly_pad_takeoff_hover(events, hover_time=60, actions=actions)
+                logpath = self.current_onboard_log_filepath()
+                self.context_pop()
+                maxima, switches = self.ekf_vertical_errors(logpath, events, windows)
+                floors = self.averaged_accel_bias_floor(logpath, events, windows)
+                results.append((profile, name, maxima, floors))
+        # heights are relative to arming, when the estimate followed the
+        # low height, so a correct estimate shows 0.3 m once it has cleared
+        self.progress("Max |height error| (m) / max |VD error| (m/s); UWB height 0.3 m low until 1.5 s into the climb")
+        for (profile, name, maxima, floors) in results:
+            self.progress("%-7s %-20s %s ZBU %s" % (
+                profile, name, " ".join(["%5.2f / %4.2f " % (h, v) for (h, v) in maxima]),
+                "/".join(["%.2f" % f for f in floors])))
+
+        by_name = {(profile, name): (maxima, floors) for (profile, name, maxima, floors) in results}
+        (floored, floors) = by_name[("none", "averaged, DIFF 0.25")]
+        if max(floors) > 0.01:
+            raise NotAchievedException("bias floor opened without IMU offsets moving: %s" % str(floors))
+        (plain, plain_floors) = by_name[("al011", "averaged lane")]
+        (floored, floors) = by_name[("al011", "averaged, DIFF 0.25")]
+        if floored[2][0] > plain[2][0]:
+            raise NotAchievedException("bias floor did not learn the AL-011 offset (%.2f vs %.2f m)" % (floored[2][0], plain[2][0]))
+
+    def EK3AccelAverageFailover(self):
+        '''averaged-accel EKF3 lane: IMU dropouts, rejoining and clipping cause no step'''
+        # IMU1 lost just after lift-off and back in the hover, then IMU0
+        # lost and back, then IMU1 clipping
+        faults = {
+            0.5: ("SIM_ACC_FAIL_MSK", 2),
+            15: ("SIM_ACC_FAIL_MSK", 0),
+            30: ("SIM_ACC_FAIL_MSK", 1),
+            40: ("SIM_ACC_FAIL_MSK", 0),
+            50: ("SIM_ACCEL2_FAIL", 200),
+            52: ("SIM_ACCEL2_FAIL", 0),
+        }
+        windows = [(0, 15), (15, 30), (30, 40), (40, 50), (50, 65)]
+        labels = ["IMU1 out at lift-off", "IMU1 rejoins", "IMU0 out in hover", "IMU0 rejoins", "IMU1 clips 2s"]
+        runs = []
+        for inject in False, True:
+            self.context_push()
+            self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3})
+            self.set_parameters({
+                "SIM_ACC_FAIL_MSK": 0,
+                "SIM_ACCEL2_FAIL": 0,
+            })
+            events = {}
+            self.install_accel_offset_profile("drone2", events)
+            actions = {}
+            if inject:
+                for (t, (name, value)) in faults.items():
+                    actions[t] = lambda name=name, value=value: self.send_set_parameter_direct(name, value)
+            self.fly_pad_takeoff_hover(events, hover_time=65, actions=actions)
+            logpath = self.current_onboard_log_filepath()
+            self.context_pop()
+            runs.append((logpath, events, self.ekf_vertical_errors(logpath, events, windows)[0]))
+
+        self.progress("Max |height error| (m) / max |VD error| (m/s), drone2 offsets")
+        self.progress("%-22s %-13s %s" % ("window", "no fault", "with fault"))
+        for (i, label) in enumerate(labels):
+            self.progress("%-22s %5.2f / %4.2f  %5.2f / %4.2f" % ((label,) + tuple(runs[0][2][i]) + tuple(runs[1][2][i])))
+
+        (logpath, events, maxima) = runs[1]
+        dfreader = self.dfreader_for_path(logpath)
+        solo = {}
+        faulted = {}
+        fade_start = {}
+        fade_end = {}
+        while True:
+            m = dfreader.recv_match(type="XKAV")
+            if m is None:
+                break
+            if m.C != 0:
+                continue
+            t = m.TimeUS * 1e-6 - events["lift"]
+            for (i, (start, end)) in enumerate(windows):
+                if start <= t < end:
+                    solo.setdefault(i, set()).add(m.Solo)
+                    faulted[i] = faulted.get(i, 0) | m.Flt
+                    if m.Solo != -1 and m.Fade > 0:
+                        fade_start.setdefault(i, t)
+                    if m.Solo == -1 and i in fade_start:
+                        fade_end.setdefault(i, t)
+        self.progress("XKAV Solo per window: %s, Flt: %s" % (str(solo), str(faulted)))
+        if 0 not in solo[0] or 1 not in solo[2] or 0 not in solo[4]:
+            raise NotAchievedException("averaging did not stand in with the healthy IMU")
+        if faulted[4] & 2 == 0:
+            raise NotAchievedException("clipping IMU1 not flagged")
+        for i in 1, 3:
+            if i not in fade_end:
+                raise NotAchievedException("IMU did not rejoin the average in %s" % labels[i])
+            fade_time = fade_end[i] - fade_start[i]
+            self.progress("%s: faded back in over %.1fs" % (labels[i], fade_time))
+            if abs(fade_time - 3) > 0.5:
+                raise NotAchievedException("returning IMU faded in over %.1fs" % fade_time)
+        for ((h0, v0), (h1, v1)) in zip(runs[0][2], maxima):
+            if h1 > h0 + 0.2 or v1 > v0 + 0.25:
+                raise NotAchievedException("failover transient too large (%s vs %s)" % (str(maxima), str(runs[0][2])))
+
+    def EK3AccelAverageDisagree(self):
+        '''averaged-accel EKF3 lane: disagreeing healthy IMUs get a warning but stay averaged'''
+        self.context_push()
+        self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3})
+        self.set_parameter("SIM_ACC2_BIAS_Z", 0)
+        events = {}
+        self.context_collect('STATUSTEXT')
+        actions = {
+            10: lambda: self.send_set_parameter_direct("SIM_ACC2_BIAS_Z", 1.4),
+        }
+        self.fly_pad_takeoff_hover(events, hover_time=30, actions=actions)
+        self.wait_statustext("IMU0/IMU1 accels differ", check_context=True)
+        logpath = self.current_onboard_log_filepath()
+        self.context_pop()
+        dfreader = self.dfreader_for_path(logpath)
+        while True:
+            m = dfreader.recv_match(type="XKAV")
+            if m is None:
+                break
+            if m.C == 0 and m.TimeUS * 1e-6 > events["arm"] and (m.Solo != -1 or m.Flt != 0):
+                raise NotAchievedException("IMU dropped on disagreement: %s" % str(m))
+        maxima, switches = self.ekf_vertical_errors(logpath, events, [(10, 30)])
+        self.progress("1.4 m/s/s step on IMU1: max |height error| %.2f m, max |VD error| %.2f m/s" % tuple(maxima[0]))
+
+    def EK3AccelAveragePrearm(self):
+        '''averaged-accel EKF3 lane: arming needs both IMUs in the average'''
+        self.context_push()
+        self.set_parameters({
+            "EK3_IMU_MASK": 1,
+            "EK3_ACC_AVG": 3,
+        })
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("SIM_ACC_FAIL_MSK", 2)
+        self.assert_prearm_failure("Accels not healthy", other_prearm_failures_fatal=False)
+        self.set_parameter("SIM_ACC_FAIL_MSK", 0)
+        self.wait_ready_to_arm()
+        self.set_parameter("INS_USE2", 0)
+        self.assert_prearm_failure("EKF3[1] IMU1 accel not averaged", other_prearm_failures_fatal=False)
+        self.set_parameter("INS_USE2", 1)
+        self.wait_ready_to_arm()
+        self.context_pop()
+        self.reboot_sitl()
+
+    def test_replay_accel_average_bit(self):
+        self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25}, replay=True)
+        self.set_parameters({
+            "SIM_ACC_FAIL_MSK": 0,
+            "SIM_ACCEL2_FAIL": 0,
+        })
+        events = {}
+        self.install_accel_offset_profile("drone2", events)
+        actions = {
+            0.5: lambda: self.send_set_parameter_direct("SIM_ACC_FAIL_MSK", 2),
+            8: lambda: self.send_set_parameter_direct("SIM_ACC_FAIL_MSK", 0),
+            15: lambda: self.send_set_parameter_direct("SIM_ACCEL2_FAIL", 200),
+            16: lambda: self.send_set_parameter_direct("SIM_ACCEL2_FAIL", 0),
+        }
+        self.fly_pad_takeoff_hover(events, hover_time=25, actions=actions)
+        return self.current_onboard_log_filepath()
+
     def tests2b(self):  # this block currently around 9.5mins here
         '''return list of all tests'''
         ret = ([
@@ -16823,6 +17247,11 @@ return update, 1000
             self.PLDNoParameters,
             self.PeriphMultiUARTTunnel,
             self.EKF3SRCPerCore,
+            self.EK3AccelAverageOffsets,
+            self.EK3AccelAverageFailover,
+            self.EK3AccelAverageUwbStep,
+            self.EK3AccelAverageDisagree,
+            self.EK3AccelAveragePrearm,
         ])
         return ret
 

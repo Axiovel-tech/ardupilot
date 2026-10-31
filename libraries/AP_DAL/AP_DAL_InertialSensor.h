@@ -27,6 +27,8 @@ public:
         delta_velocity_dt = _RISI[i].delta_velocity_dt;
         return _RISI[i].get_delta_velocity_ret;
     }
+    // true if the accel clipped since the previous frame
+    bool accel_clipping(uint8_t i) const { return _RISI[i].accel_clipping; }
 
     // gyro stuff
     uint8_t get_gyro_count(void) const { return _RISH.gyro_count; }
@@ -65,6 +67,8 @@ private:
 
     // sensor positions
     Vector3f pos[INS_MAX_INSTANCES];
+
+    uint32_t accel_clip_count[INS_MAX_INSTANCES];
 
     Vector3f gyro_filtered[INS_MAX_INSTANCES];
     Vector3f accel_filtered[INS_MAX_INSTANCES];
