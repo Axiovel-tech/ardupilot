@@ -349,6 +349,9 @@ bool GCS_MAVLINK_Copter::try_send_message(enum ap_message id)
 #if MODE_DRONE_SHOW_ENABLED
         CHECK_PAYLOAD_SIZE(DATA16);
         copter.g2.drone_show_manager.send_drone_show_status(chan);
+        if (copter.g2.drone_show_manager.uses_show_clock_for_show_start() && HAVE_PAYLOAD_SPACE(chan, DATA16)) {
+            copter.g2.drone_show_manager.send_show_schedule_status(chan);
+        }
 #endif
         break;
     }
@@ -357,6 +360,9 @@ bool GCS_MAVLINK_Copter::try_send_message(enum ap_message id)
 #if MODE_DRONE_SHOW_ENABLED
         CHECK_PAYLOAD_SIZE(DATA96);
         copter.g2.drone_show_manager.send_extended_drone_show_status(chan);
+        if (copter.g2.drone_show_manager.uses_show_clock_for_show_start() && HAVE_PAYLOAD_SPACE(chan, DATA16)) {
+            copter.g2.drone_show_manager.send_show_schedule_status(chan);
+        }
 #endif
         break;
     }

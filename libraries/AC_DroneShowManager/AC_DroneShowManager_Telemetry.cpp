@@ -56,6 +56,50 @@ void AC_DroneShowManager::send_drone_show_status(const mavlink_channel_t chan) c
     );
 }
 
+void AC_DroneShowManager::send_show_schedule_status(const mavlink_channel_t chan) const
+{
+    uint8_t packet[16];
+    CustomPackets::axio_show_schedule_status_t status {};
+    const bool clock_valid = _show_clock.is_valid();
+
+    status.type = CustomPackets::AXIO_SHOW_SCHEDULE_STATUS;
+    status.schedule_id = _show_schedule_id;
+    status.flags = clock_valid ? CustomPackets::AXIO_SCHEDULE_CLOCK_VALID : 0;
+    status.start_cluster_usec = 0;
+
+    if (has_scheduled_start_time()) {
+        const bool set_by_rc = _start_time_on_show_clock_usec == 0;
+
+        status.flags |= CustomPackets::AXIO_SCHEDULE_HAS_START;
+        if (set_by_rc) {
+            status.flags |= CustomPackets::AXIO_SCHEDULE_SET_BY_RC;
+        }
+        if (_is_start_time_committed()) {
+            status.flags |= CustomPackets::AXIO_SCHEDULE_COMMITTED;
+        }
+
+        // Before the commit the start is echoed exactly as received; after it,
+        // mapped back through the current offset, which shows the drift of the
+        // internal clock against the show clock
+        if (!set_by_rc && !_start_time_on_show_clock_committed) {
+            status.start_cluster_usec = _start_time_on_show_clock_usec;
+        } else if (clock_valid) {
+            status.start_cluster_usec = _show_clock.local_to_show_usec(_start_time_on_internal_clock_usec);
+        } else {
+            status.start_cluster_usec = _start_time_on_show_clock_usec;
+        }
+    }
+
+    memset(packet, 0, sizeof(packet));
+    memcpy(packet, &status, sizeof(status));
+    mavlink_msg_data16_send(
+        chan,
+        CustomPackets::AXIO_DRONE_TO_GCS,
+        sizeof(status),
+        packet
+    );
+}
+
 void AC_DroneShowManager::send_extended_drone_show_status(const mavlink_channel_t chan) const
 {
     uint8_t packet[96];
@@ -144,7 +188,10 @@ uint8_t* AC_DroneShowManager::_fill_drone_show_status_packet_buffer(uint8_t* buf
         // versions
         flags |= (1 << 2);
     }
-    if (uses_gps_time_for_show_start() && !_is_gps_time_ok()) {
+    if (
+        (uses_gps_time_for_show_start() || uses_show_clock_for_show_start()) &&
+        !_is_start_time_reference_ok()
+    ) {
         flags |= (1 << 1);
     }
     if (AP::fence()->get_breaches()) {

@@ -227,8 +227,8 @@ const AP_Param::GroupInfo AC_DroneShowManager::var_info[] = {
 
     // @Param: SYNC_MODE
     // @DisplayName: Time synchronization mode
-    // @Description: Time synchronization mode to use when starting the show
-    // @Values: 0:Countdown, 1:GPS time
+    // @Description: Time synchronization mode to use when starting the show. Show clock: the start arrives as an Axio schedule on the UWB cluster clock that the positioning tag broadcasts, is frozen on the internal clock 10 seconds before the start and can only be aborted after that; the RC start switch works as in countdown mode.
+    // @Values: 0:Countdown, 1:GPS time, 2:Show clock
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("SYNC_MODE", 18, AC_DroneShowManager, _params.time_sync_mode, DEFAULT_SYNC_MODE),
