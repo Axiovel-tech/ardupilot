@@ -2,6 +2,7 @@
 
 #include <AP_Filesystem/AP_Filesystem.h>
 #include <AP_HAL/AP_HAL.h>
+#include <GCS_MAVLink/GCS.h>
 
 #include <skybrush/skybrush.h>
 
@@ -49,13 +50,13 @@ bool AC_DroneShowManager::_create_show_directory()
     // https://github.com/ArduPilot/ardupilot/issues/16103
     EXPECT_DELAY_MS(3000);
 
-    if (AP::FS().mkdir(HAL_BOARD_COLLMOT_DIRECTORY) < 0) {
+    if (AP::FS().mkdir(HAL_BOARD_AXIO_DIRECTORY) < 0) {
         if (errno == EEXIST) {
             // Directory already exists, this is okay
         } else {
             hal.console->printf(
                 "Failed to create directory %s: %s (code %d)\n",
-                 HAL_BOARD_COLLMOT_DIRECTORY, strerror(errno), errno
+                HAL_BOARD_AXIO_DIRECTORY, strerror(errno), errno
             );
             return false;
         }
@@ -64,35 +65,41 @@ bool AC_DroneShowManager::_create_show_directory()
     return true;
 }
 
-bool AC_DroneShowManager::_load_show_file_from_storage()
+bool AC_DroneShowManager::_read_file_head(const char* path, uint8_t* buf, size_t length)
 {
-    int fd = -1;
-    int retval;
-    struct stat stat_data;
-    uint8_t *show_data, *write_ptr, *end_ptr;
-    ssize_t to_read, actually_read;
-    bool success = false;
-    
-    // Clear any previously loaded show, rewind the clock to zero and free up
-    // any memory used by the previously loaded show
-    sb_screenplay_clear(&_screenplay);
-    sb_screenplay_scene_clear_contents(&_main_show_scene);
-    sb_show_controller_notify_screenplay_changed(&_show_controller);
-    sb_show_controller_update_time_msec(&_show_controller, 0);
-    _invalidate_projected_wall_clock_time_at_takeoff();
-    if (_show_data)
+    const int fd = AP::FS().open(path, O_RDONLY);
+    if (fd < 0)
     {
-        free(_show_data);
-        _show_data = nullptr;
+        return false;
     }
 
-    // Check whether the show file exists
-    retval = AP::FS().stat(SHOW_FILE, &stat_data);
-    if (retval)
-    {
-        // Show file does not exist. This basically means that the operation
-        // was successful.
-        return true;
+    const ssize_t actually_read = AP::FS().read(fd, buf, length);
+    AP::FS().close(fd);
+    return actually_read == static_cast<ssize_t>(length);
+}
+
+bool AC_DroneShowManager::_read_file_into_memory(
+    const char* path, size_t max_size, uint8_t** data, size_t* length
+)
+{
+    int fd = -1;
+    struct stat stat_data;
+    uint8_t *buf, *write_ptr, *end_ptr;
+    ssize_t to_read, actually_read;
+    bool success = false;
+
+    *data = nullptr;
+    *length = 0;
+
+    if (AP::FS().stat(path, &stat_data)) {
+        return false;
+    }
+
+    if (stat_data.st_size < 0 || static_cast<size_t>(stat_data.st_size) > max_size) {
+        hal.console->printf(
+            "Show file too large: %ld bytes\n",
+            static_cast<long int>(stat_data.st_size));
+        return false;
     }
 
     // Ensure that we have a sensible block size that we will use when reading
@@ -103,28 +110,28 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     }
 
     // Allocate memory for the whole content of the file
-    show_data = static_cast<uint8_t *>(calloc(stat_data.st_size, sizeof(uint8_t)));
-    if (show_data == 0)
+    buf = static_cast<uint8_t *>(calloc(stat_data.st_size, sizeof(uint8_t)));
+    if (buf == 0)
     {
         hal.console->printf(
             "Show file too large: %ld bytes\n",
             static_cast<long int>(stat_data.st_size));
         return false;
     }
-    
-    // From this point onwards, show_data is owned by us and must be freed
-    // so do not return from the function without freeing it. If you need an
-    // early return, jump to the "exit" label.
+
+    // From this point onwards, buf is owned by us and must be freed unless it
+    // is handed over to the caller. If you need an early return, jump to the
+    // "exit" label.
 
     // Read the entire show file into memory
-    fd = AP::FS().open(SHOW_FILE, O_RDONLY);
+    fd = AP::FS().open(path, O_RDONLY);
     if (fd < 0)
     {
         goto exit;
     }
-    
-    write_ptr = show_data;
-    end_ptr = show_data + stat_data.st_size;
+
+    write_ptr = buf;
+    end_ptr = buf + stat_data.st_size;
 
     while (write_ptr < end_ptr)
     {
@@ -145,7 +152,7 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
             /* Error while reading */
             hal.console->printf(
                 "IO error while reading show file near byte %ld, errno = %d\n",
-                static_cast<long int>(write_ptr - show_data),
+                static_cast<long int>(write_ptr - buf),
                 static_cast<int>(errno)
             );
             goto exit;
@@ -161,12 +168,136 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         }
     }
 
-    // Parse the show file and find the trajectory, light program, yaw control data
-    // and event list in it.
-    retval = static_cast<int>(
-        sb_screenplay_update_from_binary_file_in_memory(&_screenplay, show_data, stat_data.st_size)
-    );
-    success = retval == SB_SUCCESS;
+    if (write_ptr != end_ptr)
+    {
+        hal.console->printf("Show file is shorter than expected\n");
+        goto exit;
+    }
+
+    *length = stat_data.st_size;
+    *data = buf;
+    buf = nullptr;
+    success = true;
+
+exit:
+    if (buf)
+    {
+        free(buf);
+    }
+
+    if (fd >= 0)
+    {
+        AP::FS().close(fd);
+    }
+
+    return success;
+}
+
+bool AC_DroneShowManager::_load_show_file_from_storage()
+{
+    int retval;
+    struct stat stat_data;
+    uint8_t *show_data = nullptr;
+    size_t show_length = 0;
+    bool success = false;
+    
+    // Clear any previously loaded show, rewind the clock to zero and free up
+    // any memory used by the previously loaded show
+    sb_screenplay_clear(&_screenplay);
+    sb_screenplay_scene_clear_contents(&_main_show_scene);
+    sb_show_controller_notify_screenplay_changed(&_show_controller);
+    sb_show_controller_update_time_msec(&_show_controller, 0);
+    _invalidate_projected_wall_clock_time_at_takeoff();
+    gdmb_show_free(&_gdmb_show);
+    _gdmb_reference_valid = false;
+    memset(&_show_identity, 0, sizeof(_show_identity));
+    if (_show_data)
+    {
+        free(_show_data);
+        _show_data = nullptr;
+    }
+
+    if (AP::FS().stat(SHOW_FILE, &stat_data))
+    {
+        // Show file does not exist. This basically means that the operation
+        // was successful.
+        return true;
+    }
+
+    // A .gdmb larger than the spec's cap is refused before anything is
+    // allocated for it; only its magic is read
+    if (static_cast<uint64_t>(stat_data.st_size) > GDMB_MAX_FILE_SIZE)
+    {
+        uint8_t magic[4];
+        if (
+            _read_file_head(SHOW_FILE, magic, sizeof(magic)) &&
+            gdmb_detect_show_file_format(magic, sizeof(magic)) == GDMB_SHOW_FILE_GDMB
+        ) {
+            gcs().send_text(
+                MAV_SEVERITY_ERROR, "Show rejected: E_SIZE (%ld bytes, cap %u)",
+                static_cast<long int>(stat_data.st_size), static_cast<unsigned>(GDMB_MAX_FILE_SIZE)
+            );
+            return false;
+        }
+    }
+
+    if (!_read_file_into_memory(SHOW_FILE, SIZE_MAX, &show_data, &show_length))
+    {
+        gcs().send_text(MAV_SEVERITY_ERROR, "Show file %s could not be read", SHOW_FILE);
+        return false;
+    }
+
+    // The slot holds either format; the magic decides
+    switch (gdmb_detect_show_file_format(show_data, show_length))
+    {
+        case GDMB_SHOW_FILE_GDMB:
+            // If the .gdmb file is invalid, no show is loaded
+            success = _load_gdmb_show_from_memory(show_data, show_length);
+            break;
+
+        case GDMB_SHOW_FILE_SKYB:
+            // A valid CRC is required for both formats. libskybrush checks
+            // the .skyb CRC only when the header declares one (version 2 with
+            // the CRC feature bit), so a file without one is refused here.
+            if (!gdmb_skyb_header_has_crc(show_data, show_length))
+            {
+                gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb without CRC");
+                success = false;
+                break;
+            }
+
+            // Parse the show file and find the trajectory, light program, yaw control data
+            // and event list in it.
+            retval = static_cast<int>(
+                sb_screenplay_update_from_binary_file_in_memory(&_screenplay, show_data, show_length)
+            );
+            success = retval == SB_SUCCESS;
+            if (!success)
+            {
+                hal.console->printf("Error while parsing show file, code: %d\n", retval);
+                if (retval == SB_ECORRUPTED) {
+                    gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb CRC mismatch");
+                } else {
+                    gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: .skyb parse error %d", retval);
+                }
+            }
+            break;
+
+        default:
+        {
+            char magic[9] = { 0 };
+            for (size_t i = 0; i < 4 && i < show_length; i++)
+            {
+                hal.util->snprintf(magic + 2 * i, 3, "%02x", show_data[i]);
+            }
+            gcs().send_text(
+                MAV_SEVERITY_ERROR, "Show rejected: unknown format (magic %s)",
+                show_length > 0 ? magic : "empty"
+            );
+            success = false;
+            break;
+        }
+    }
     
     if (success)
     {
@@ -178,11 +309,13 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
         if (!_recalculate_trajectory_properties())
         {
             hal.console->printf("Error while calculating trajectory properties\n");
+            gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: trajectory properties");
             success = false;
         }
         else if (!is_trajectory_plausible())
         {
             hal.console->printf("Takeoff or landing time is invalid\n");
+            gcs().send_text(MAV_SEVERITY_ERROR, "Show rejected: takeoff or landing time invalid");
             success = false;
         }
         else
@@ -193,11 +326,18 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
                 _trajectory_stats.takeoff_time_sec, 
                 _trajectory_stats.landing_time_sec
             );
+
+            if (is_gdmb_show_loaded())
+            {
+                // The show hash identifies the show on the ground (spec §3.3)
+                const uint8_t* hash = _gdmb_show.show_hash;
+                gcs().send_text(
+                    MAV_SEVERITY_INFO, "Loaded .gdmb show %02x%02x%02x%02x, %.1fs",
+                    hash[0], hash[1], hash[2], hash[3],
+                    static_cast<double>(_gdmb_show.duration_us * 1.0e-6f)
+                );
+            }
         }
-    }
-    else
-    {
-        hal.console->printf("Error while parsing show file, code: %d\n", retval);
     }
     
     if (success)
@@ -228,6 +368,15 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     
     if (success)
     {
+        // Remember which file this is: both formats carry their CRC in the
+        // header (.gdmb at offset 8, .skyb v2 at offset 6)
+        _show_identity.format = is_gdmb_show_loaded() ? ShowFileFormat_Gdmb : ShowFileFormat_Skyb;
+        _show_identity.size = show_length;
+        _show_identity.header_crc32 = is_gdmb_show_loaded()
+            ? UINT32_VALUE(show_data[11], show_data[10], show_data[9], show_data[8])
+            : UINT32_VALUE(show_data[9], show_data[8], show_data[7], show_data[6]);
+        _show_identity.file_crc32 = gdmb_crc32(0, show_data, show_length);
+
         // move ownership of the show data to the class member
         _show_data = show_data;
         show_data = nullptr;
@@ -243,6 +392,8 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     else
     {
         sb_screenplay_clear(&_screenplay);
+        sb_show_controller_notify_screenplay_changed(&_show_controller);
+        gdmb_show_free(&_gdmb_show);
     }
     
     // Now that the screenplay is updated, forget the previous sequence number of
@@ -250,18 +401,11 @@ bool AC_DroneShowManager::_load_show_file_from_storage()
     // screenplay) when the GCS sends one
     _last_time_axis_config_seq_no = 0xFFFF;    // 0xFFFF is never a valid sequence number
 
-exit:
     // if we still have the show data here and its ownership was not moved to the
     // class member, free it now
     if (show_data)
     {
         free(show_data);
-    }
-    
-    // Also clean up any open file descriptors
-    if (fd >= 0)
-    {
-        AP::FS().close(fd);
     }
     
     return success;
@@ -307,7 +451,36 @@ bool AC_DroneShowManager::_recalculate_trajectory_properties()
         success = true;
     }
 
+    const float preferred_descent_mm = stats_calculator.preferred_descent;
     sb_trajectory_stats_calculator_destroy(&stats_calculator);
+
+    if (success && is_gdmb_show_loaded())
+    {
+        // The libskybrush copy of a .gdmb trajectory is cut into short
+        // pieces, and libskybrush judges verticality per piece, so a final
+        // descent that creeps sideways would look vertical and the automatic
+        // landing would start too early, away from the pad. Take the landing
+        // time from the .gdmb curve itself, with the same threshold (50 mm)
+        // and preferred descent.
+        uint32_t landing_us;
+        gdmb_state_t st;
+        if (
+            gdmb_show_landing_time(
+                &_gdmb_show, 0.05, preferred_descent_mm / 1000.0, 10000, &landing_us
+            ) == GDMB_OK &&
+            gdmb_show_evaluate(&_gdmb_show, landing_us, &st) == GDMB_OK
+        ) {
+            _trajectory_stats.landing_time_sec = landing_us / 1.0e6f;
+            _trajectory_stats.pos_at_landing_time.x = st.p[0] * 1000.0f;
+            _trajectory_stats.pos_at_landing_time.y = st.p[1] * 1000.0f;
+            _trajectory_stats.pos_at_landing_time.z = st.p[2] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.x = st.v[0] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.y = st.v[1] * 1000.0f;
+            _trajectory_stats.vel_at_landing_time.z = st.v[2] * 1000.0f;
+        } else {
+            success = false;
+        }
+    }
 
     if (success)
     {
