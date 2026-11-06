@@ -95,6 +95,11 @@ private:
     // from "live takeoff", which happens when the start time is reached.
     DroneShowModeStage _next_stage_after_takeoff;
 
+    // Altitude above the EKF origin where the takeoff started. The takeoff target
+    // is measured from here, and the height estimate may have moved away from
+    // home since arming while the motors were idling on the pad.
+    int32_t _takeoff_start_alt_above_origin_cm;
+
     // Stores whether we have performed the preflight calibration before takeoff.
     bool _preflight_calibration_done;
 
