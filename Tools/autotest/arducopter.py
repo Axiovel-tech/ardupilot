@@ -10,6 +10,7 @@ import copy
 import math
 import os
 import shutil
+import struct
 import tempfile
 import time
 import numpy
@@ -13620,6 +13621,120 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.progress("Sprayer OK")
 
+    DRONE_SHOW_MODE = 127
+    DRONE_SHOW_STAGE_TAKEOFF = 3
+    DRONE_SHOW_STAGE_PERFORMING = 4
+
+    def write_drone_show_file(self, segments):
+        '''write a .skyb version 2 show with a trajectory of linear segments
+        of (duration_s, x_m, y_m, z_m), checksummed with AP's CRC32'''
+        body = bytearray(struct.pack("<Bhhhh", 1, 0, 0, 0, 0))
+        last = (0, 0, 0)
+        for duration, *xyz in segments:
+            end = tuple(int(round(v * 1000)) for v in xyz)
+            header = 0
+            coords = bytearray()
+            for axis in range(3):
+                if end[axis] != last[axis]:
+                    header |= 1 << (2 * axis)
+                    coords += struct.pack("<h", end[axis])
+            body += struct.pack("<BH", header, int(duration * 1000)) + coords
+            last = end
+        data = bytearray(b"skyb\x02\x01\x00\x00\x00\x00" + struct.pack("<BH", 1, len(body)) + body)
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                crc = (crc >> 1) ^ (0xEDB88320 if crc & 1 else 0)
+        data[6:10] = struct.pack("<I", crc)
+        os.makedirs("axio", exist_ok=True)
+        with open(os.path.join("axio", "show.bin"), "wb") as f:
+            f.write(data)
+
+    def schedule_drone_show(self, lead_time):
+        '''schedule the show lead_time seconds from now (GPS time of week) and authorize it'''
+        unix = self.assert_receive_message('SYSTEM_TIME', timeout=5).time_unix_usec * 1e-6
+        self.set_parameters({
+            "SHOW_START_TIME": int(unix - 315964800 + 18 + lead_time) % 604800,
+            "SHOW_START_AUTH": 1,
+        })
+        self.change_mode(self.DRONE_SHOW_MODE)
+
+    def drone_show_stages(self):
+        '''returns the show stage changes in the current onboard log'''
+        dfreader = self.dfreader_for_current_onboard_log()
+        stages = []
+        while True:
+            m = dfreader.recv_match(type='SHOW')
+            if m is None:
+                return stages
+            if not stages or stages[-1][1] != m.Stage:
+                stages.append((m.TimeUS * 1e-6, m.Stage))
+
+    def DroneShowTakeoffPadSink(self):
+        '''SHOW takeoff exit is measured from where the takeoff started, not from home'''
+        self.context_push()
+        self.customise_SITL_commandline(["--serial5=sim:vicon:"])
+        self.wait_ready_to_arm()
+        here = self.assert_receive_message('GLOBAL_POSITION_INT')
+        self.write_drone_show_file([(5, 0, 0, 0), (2, 0, 0, 2), (10, 0, 0, 2), (4, 0, 0, 0)])
+        self.set_parameters({
+            "EK3_SRC1_POSXY": 6,
+            "EK3_SRC1_VELXY": 0,
+            "EK3_SRC1_POSZ": 6,
+            "EK3_SRC1_VELZ": 0,
+            "EK3_IMU_MASK": 1,
+            "VISO_TYPE": 1,
+            "SERIAL5_PROTOCOL": 2,
+            "SIM_VICON_TMASK": 1,
+            "SIM_VICON_RATE": 50,
+            "SHOW_TAKEOFF_ALT": 1,
+            "SHOW_ORIGIN_LAT": here.lat,
+            "SHOW_ORIGIN_LNG": here.lon,
+            "SHOW_ORIENTATION": 0,
+        })
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        try:
+            self.start_subtest("Height estimate sinks on the pad: hands over in about a second")
+            self.schedule_drone_show(20)
+            self.wait_armed(timeout=30)
+            # more than the 0.3 m by which the takeoff target clears the old gate above home
+            self.set_parameter("SIM_VICON_GLIT_Z", 0.4)
+            self.wait_disarmed(timeout=90)
+            self.set_parameter("SIM_VICON_GLIT_Z", 0)
+            stages = self.drone_show_stages()
+            sequence = [s for (t, s) in stages]
+            i = sequence.index(self.DRONE_SHOW_STAGE_TAKEOFF)
+            if sequence[i+1] != self.DRONE_SHOW_STAGE_PERFORMING:
+                raise NotAchievedException("Unexpected stages after takeoff: %s" % str(sequence[i:]))
+            duration = stages[i+1][0] - stages[i][0]
+            self.progress("Takeoff stage lasted %.2f s" % duration)
+            if duration > 3:
+                raise NotAchievedException("Takeoff stage lasted %.2f s" % duration)
+
+            self.start_subtest("Too little thrust to lift off: stays in the takeoff stage")
+            self.change_mode('STABILIZE')
+            self.set_parameters({
+                "SIM_ENGINE_FAIL": 0b1111,
+                "SIM_ENGINE_MUL": 0.3,
+            })
+            self.schedule_drone_show(20)
+            self.wait_armed(timeout=30)
+            self.delay_sim_time(20)
+            self.change_mode('LAND')
+            self.wait_disarmed(timeout=60)
+            # one continuous log holds both flights
+            sequence = [s for (t, s) in self.drone_show_stages()]
+            second = sequence[len(sequence) - sequence[::-1].index(self.DRONE_SHOW_STAGE_TAKEOFF):]
+            if self.DRONE_SHOW_STAGE_PERFORMING in second:
+                raise NotAchievedException("Handed over without lifting off: %s" % str(sequence))
+        finally:
+            os.remove(os.path.join("axio", "show.bin"))
+            self.disarm_vehicle(force=True)
+            self.context_pop()
+            self.reboot_sitl()
+
     def tests1a(self):
         '''return list of all tests'''
         ret = super(AutoTestCopter, self).tests()  # about 5 mins and ~20 initial tests from autotest/vehicle_test_suite.py
@@ -13729,6 +13844,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.BaseLoggingRates,
              self.BodyFrameOdom,
              self.GPSViconSwitching,
+             self.DroneShowTakeoffPadSink,
         ])
         return ret
 
