@@ -17235,6 +17235,8 @@ return update, 1000
         self.reboot_sitl()
 
     def test_replay_accel_average_bit(self):
+        # the bit before this one leaves the pitch stick deflected
+        self.set_rc_default()
         self.setup_external_nav_like_revb({"EK3_IMU_MASK": 1, "EK3_ACC_AVG": 3, "EK3_ABIAS_DIFF": 0.25}, replay=True)
         self.set_parameters({
             "SIM_ACC_FAIL_MSK": 0,
