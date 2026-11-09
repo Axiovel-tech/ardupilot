@@ -4466,6 +4466,47 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         else:
             raise NotAchievedException("Detected peak %.1f Hz %.2f dB" % (freq, peakdB))
 
+    def ExtNavClockReset(self):
+        """External-nav fixes are timed correctly as soon as the sender's clock restarts"""
+        self.set_parameter("VISO_TYPE", 1)
+        self.reboot_sitl()
+        self.set_streamrate(20, stream=mavutil.mavlink.MAV_DATA_STREAM_EXTRA1)
+
+        def send_fixes(seconds, remote_ms_at_boot_ms):
+            tstart = self.get_sim_time()
+            while self.get_sim_time_cached() - tstart < seconds:
+                m = self.assert_receive_message('ATTITUDE')
+                usec = (m.time_boot_ms + remote_ms_at_boot_ms) * 1000
+                self.mav.mav.vision_position_estimate_send(usec, 0, 0, 0, 0, 0, 0)
+
+        # the sender has been up for 1000 s, then reboots: 8 s of silence and
+        # its clock restarts at 2 s
+        send_fixes(15, 1000000)
+        self.delay_sim_time(8)
+        reboot_ms = self.assert_receive_message('ATTITUDE').time_boot_ms
+        send_fixes(15, 2000 - reboot_ms)
+
+        # The corrected time must match the sender's clock mapped back onto
+        # ours, within the transport lag and the baud-time correction; a stale
+        # offset makes fixes 500 ms old.
+        dfreader = self.dfreader_for_current_onboard_log()
+        errors = []
+        while True:
+            m = dfreader.recv_match(type='VISP')
+            if m is None:
+                break
+            remote_ms = m.RTimeUS // 1000
+            boot_ms = remote_ms - 1000000 if remote_ms > 1000000 else remote_ms - 2000 + reboot_ms
+            errors.append((m.RTimeUS < 1000000000, m.CTimeMS - boot_ms))
+        after_reboot = [e for (restarted, e) in errors if restarted]
+        self.progress("%u fixes, %u after the reboot, errors after it %d..%d ms" %
+                      (len(errors), len(after_reboot), min(after_reboot), max(after_reboot)))
+        if len(after_reboot) < 100:
+            raise NotAchievedException("Too few fixes after the reboot: %u" % len(after_reboot))
+        if max(abs(e) for e in after_reboot) > 100:
+            raise NotAchievedException("Fix time error after the reboot: %d..%d ms" %
+                                       (min(after_reboot), max(after_reboot)))
+
     def VisionPosition(self):
         """Disable GPS navigation, enable Vicon input."""
         # scribble down a location we can set origin to:
@@ -13840,6 +13881,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.TestLocalHomePosition,
              self.TestGripperMission,
              self.VisionPosition,
+             self.ExtNavClockReset,
              self.ATTITUDE_FAST,
              self.BaseLoggingRates,
              self.BodyFrameOdom,
