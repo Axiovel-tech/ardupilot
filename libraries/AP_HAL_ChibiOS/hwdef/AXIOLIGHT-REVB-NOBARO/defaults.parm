@@ -1,0 +1,6 @@
+@include ../AXIOLIGHT-REVB/defaults.parm
+
+# No barometer: no alternative EKF height source. These repeat REVB lines;
+# the later value is the one applied at boot.
+EK3_SRC2_POSZ,0
+EK3_SRC3_POSZ,0
