@@ -20,6 +20,7 @@
 #pragma once
 
 #include <AP_Common/Location.h>
+#include <AP_InertialSensor/AP_InertialSensor_config.h>
 #include <AP_Math/AP_Math.h>
 #include <AP_Param/AP_Param.h>
 #include <AP_NavEKF/AP_Nav_Common.h>
@@ -99,6 +100,17 @@ public:
     // return accelerometer bias estimate in m/s/s
     // An out of range instance (eg -1) returns data for the primary instance
     void getAccelBias(int8_t instance, Vector3f &accelBias) const;
+
+    // accel used by a lane that averages IMUs (EK3_ACC_AVG), before its bias
+    // is removed: sum(weight[i] * accel of IMU i) + offset
+    struct AccelAverage {
+        float weight[INS_MAX_INSTANCES];
+        Vector3f offset;
+    };
+
+    // return false if the lane doesn't average IMU accels
+    // An out of range instance (eg -1) returns data for the primary instance
+    bool getAccelAverage(int8_t instance, AccelAverage &average) const;
 
     //returns index of the active source set used
     uint8_t get_active_source_set() const;
@@ -466,6 +478,8 @@ private:
     AP_Enum<LogLevel> _log_level;   // log verbosity level
     AP_Float _gpsVAccThreshold;     // vertical accuracy threshold to use GPS as an altitude source
     AP_Int32 _options;              // bit mask of processing options
+    AP_Int8 _accAvgMask;            // bitmask of the two IMUs whose accels are averaged
+    AP_Float _accBiasDiffScale;     // averaged accel Z bias uncertainty per change of the IMU difference
 
     // enum for processing options
     enum class Option {
