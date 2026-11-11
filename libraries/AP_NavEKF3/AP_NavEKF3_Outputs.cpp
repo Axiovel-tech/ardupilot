@@ -39,6 +39,18 @@ bool NavEKF3_core::healthy(void) const
 */
 bool NavEKF3_core::pre_arm_check(bool requires_position, char *failure_msg, uint8_t failure_msg_len) const
 {
+    if (accelAvg.enabled) {
+        uint8_t notAveraged = accelAvg.faulted;
+        if (accelAvg.solo >= 0) {
+            notAveraged |= 1U << (1 - accelAvg.solo);
+        }
+        if (notAveraged != 0) {
+            dal.snprintf(failure_msg, failure_msg_len,
+                         "EKF3[%u] IMU%u accel not averaged", unsigned(core_index)+1, unsigned(accelAvg.imu[__builtin_ctz(notAveraged)]));
+            return false;
+        }
+    }
+
     if (requires_position) {
         // additional checks when position is required, used by pre-arm checks
         const float max_vel_innovation = 2.0;
@@ -147,6 +159,20 @@ void NavEKF3_core::getAccelBias(Vector3f &accelBias) const
         return;
     }
     accelBias = (stateStruct.accel_bias / dtEkfAvg).tofloat();
+}
+
+bool NavEKF3_core::getAccelAverage(NavEKF3::AccelAverage &average) const
+{
+    if (!accelAvg.enabled) {
+        return false;
+    }
+    for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
+        average.weight[i] = 0;
+    }
+    average.weight[accelAvg.imu[0]] = accelAvg.weight[0];
+    average.weight[accelAvg.imu[1]] = accelAvg.weight[1];
+    average.offset = accelAvg.offset.tofloat();
+    return true;
 }
 
 // return the transformation matrix from XYZ (body) to NED axes

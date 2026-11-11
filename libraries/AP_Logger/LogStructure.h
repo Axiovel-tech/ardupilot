@@ -1401,6 +1401,10 @@ enum LogMessages : uint8_t {
 
     LOG_IDS_FROM_DRONE_SHOW,
 
+    // after every older id: Replay copies the ids of the log it reads, so a
+    // new id among them would collide when it adds XKAV to an older log
+    LOG_XKAV_MSG,
+
     _LOG_LAST_MSG_
 };
 

@@ -112,5 +112,6 @@ private:
     void usage();
 
     void Write_Format(const struct LogStructure &s);
+    void write_XKAV_format(void);
     void write_EKF_formats(void);
 };
