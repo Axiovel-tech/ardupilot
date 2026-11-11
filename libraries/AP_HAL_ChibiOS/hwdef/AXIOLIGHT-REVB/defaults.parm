@@ -289,6 +289,14 @@ SERIAL7_BAUD,115
 SERIAL8_PROTOCOL,2
 SERIAL8_BAUD,921
 
+# The tag's position link (SERIAL4) is private: without this, ArduPilot routes
+# the tag's 50 Hz VISION_POSITION_ESTIMATE and show clock out of every other
+# MAVLink port, so they reach the ground over the tag's Wi-Fi bridge (SERIAL8).
+# Messages addressed to the tag still reach it. MAVn numbers the MAVLink serial
+# ports in order (SERIAL0, 3, 4, 8), so this is MAV3 only while SERIAL3 stays
+# MAVLink.
+MAV3_OPTIONS,2
+
 # Drone show behavior: start scheduled on the tag's show clock and run on the
 # internal clock (indoor, no GPS), 1 m show takeoff altitude, and 50 Hz
 # trajectory target updates
