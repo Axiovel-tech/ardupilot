@@ -13776,6 +13776,134 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.context_pop()
             self.reboot_sitl()
 
+    def DroneShowShutdownBlackout(self):
+        '''shutdown blackout: black is pushed before the ACK and re-pushed while latched'''
+        # The MAVLink LED backend turns every frame pushed to the LEDs into a
+        # DEBUG_VECT "rgb" (time_usec carries AP_HAL::millis()) on the same
+        # link as the COMMAND_ACK, so their arrival order is their send order.
+        self.context_push()
+        self.set_parameters({
+            "SHOW_LED0_TYPE": 1,
+            "SHOW_LED0_CHAN": 0,
+            "SHOW_PRE_LIGHTS": 2,
+        })
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        events = []
+
+        def record(mav, m):
+            if m.get_type() == "DEBUG_VECT" and m.name == "rgb":
+                events.append(m)
+            elif m.get_type() == "COMMAND_ACK" and m.command == mavutil.mavlink.MAV_CMD_USER_2:
+                events.append(m)
+        self.install_message_hook_context(record)
+
+        def is_ack(m):
+            return m.get_type() == "COMMAND_ACK"
+
+        def is_black(frame):
+            return frame.x == 0 and frame.y == 0 and frame.z == 0
+
+        def pump_until(predicate, timeout, what):
+            tstart = self.get_sim_time_cached()
+            while not predicate():
+                if self.get_sim_time_cached() - tstart > timeout:
+                    raise NotAchievedException("Timed out waiting for %s" % what)
+                self.mav.recv_match(blocking=True, timeout=0.1)
+
+        def first_after(mark, predicate):
+            for i in range(mark, len(events)):
+                if predicate(events[i]):
+                    return i
+            return None
+
+        def blackout(engage):
+            '''returns (frames before the ACK, ACK, index of the ACK)'''
+            mark = len(events)
+            self.mav.mav.command_long_send(
+                self.sysid_thismav(), 1, mavutil.mavlink.MAV_CMD_USER_2, 0,
+                2, 1 if engage else 0, 0, 0, 0, 0, 0)
+            pump_until(lambda: first_after(mark, is_ack) is not None, 5, "blackout ACK")
+            ack_index = first_after(mark, is_ack)
+            return events[mark:ack_index], events[ack_index], ack_index
+
+        def frames_between(first, last):
+            return [m for m in events[first:last] if not is_ack(m)]
+
+        def wait_for_frame(mark, predicate, timeout, what):
+            match = lambda m: not is_ack(m) and predicate(m)  # noqa: E731
+            pump_until(lambda: first_after(mark, match) is not None, timeout, what)
+            return first_after(mark, match)
+
+        try:
+            self.start_subtest("Standby lights are lit before the blackout")
+            mark = len(events)
+            self.set_parameter("SHOW_PRE_LIGHTS", 100)
+            standby = events[wait_for_frame(mark, lambda m: not is_black(m), 5, "a lit standby frame")]
+            self.progress("Standby frame: %s" % str(standby))
+
+            self.start_subtest("Black frame precedes the ACCEPTED ack")
+            frames, ack, ack_index = blackout(True)
+            if ack.result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                raise NotAchievedException("Blackout not accepted: %s" % str(ack))
+            if not frames or not is_black(frames[-1]):
+                raise NotAchievedException("ACK arrived before a black frame: %s" % str(frames))
+            self.progress("%u frame(s) between the command and its ACK, last one black" % len(frames))
+
+            self.start_subtest("Black is re-pushed on every light update while latched")
+            engaged_ms = frames[-1].time_usec
+            pump_until(lambda: frames_between(ack_index, len(events)) and
+                       frames_between(ack_index, len(events))[-1].time_usec - engaged_ms >= 2000,
+                       10, "2 s of latched frames")
+            latched = frames_between(ack_index, len(events))
+            if not all(is_black(f) for f in latched):
+                raise NotAchievedException("Non-black frame while latched")
+            span = latched[-1].time_usec - engaged_ms
+            rate = len(latched) * 1000.0 / span
+            self.progress("%u black frames in %u ms after the ACK (%.1f Hz)" % (len(latched), span, rate))
+            if rate < 45:
+                raise NotAchievedException("Black re-push rate %.1f Hz, want ~50 Hz" % rate)
+
+            self.start_subtest("Cancel resumes the standby lights")
+            frames, ack, ack_index = blackout(False)
+            if ack.result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                raise NotAchievedException("Cancel not accepted: %s" % str(ack))
+            cancel_ms = (frames[-1].time_usec if frames else latched[-1].time_usec)
+            resumed = events[wait_for_frame(ack_index, lambda m: not is_black(m), 2, "lights after cancel")]
+            self.progress("Lights resumed %u ms after the last latched frame: %s" %
+                          (resumed.time_usec - cancel_ms, str(resumed)))
+            if (resumed.x, resumed.y, resumed.z) != (standby.x, standby.y, standby.z):
+                raise NotAchievedException("Resumed %s, want the standby color %s" % (str(resumed), str(standby)))
+            mark = len(events)
+            self.delay_sim_time(1)
+            if frames_between(mark, len(events)):
+                raise NotAchievedException("Steady color still re-pushed after cancel: %s" %
+                                           str(frames_between(mark, len(events))))
+
+            self.start_subtest("The latch expires on its own")
+            frames, ack, ack_index = blackout(True)
+            if ack.result != mavutil.mavlink.MAV_RESULT_ACCEPTED or not frames or not is_black(frames[-1]):
+                raise NotAchievedException("Second blackout not painted before ACK: %s %s" % (str(frames), str(ack)))
+            engaged_ms = frames[-1].time_usec
+            expired = events[wait_for_frame(ack_index, lambda m: not is_black(m), 15, "latch expiry")]
+            held_ms = expired.time_usec - engaged_ms
+            self.progress("Blackout held %u ms before expiring" % held_ms)
+            if not 9900 <= held_ms <= 10100:
+                raise NotAchievedException("Blackout held %u ms, want 10000" % held_ms)
+
+            self.start_subtest("Denied while armed")
+            self.change_mode("STABILIZE")
+            self.arm_vehicle()
+            frames, ack, ack_index = blackout(True)
+            self.disarm_vehicle()
+            if ack.result != mavutil.mavlink.MAV_RESULT_DENIED:
+                raise NotAchievedException("Blackout while armed returned %u" % ack.result)
+        finally:
+            self.disarm_vehicle(force=True)
+            self.context_pop()
+            self.reboot_sitl()
+
     def tests1a(self):
         '''return list of all tests'''
         ret = super(AutoTestCopter, self).tests()  # about 5 mins and ~20 initial tests from autotest/vehicle_test_suite.py
@@ -13887,6 +14015,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.BodyFrameOdom,
              self.GPSViconSwitching,
              self.DroneShowTakeoffPadSink,
+             self.DroneShowShutdownBlackout,
         ])
         return ret
 
