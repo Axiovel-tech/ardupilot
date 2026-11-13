@@ -13864,6 +13864,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.progress("%u black frames in %u ms after the ACK (%.1f Hz)" % (len(latched), span, rate))
             if rate < 45:
                 raise NotAchievedException("Black re-push rate %.1f Hz, want ~50 Hz" % rate)
+            stamps = [engaged_ms] + [f.time_usec for f in latched]
+            max_gap = max(b - a for a, b in zip(stamps, stamps[1:]))
+            self.progress("Largest gap between black frames: %u ms" % max_gap)
+            if max_gap > 30:
+                raise NotAchievedException("A light update did not re-push black (gap %u ms)" % max_gap)
 
             self.start_subtest("Cancel resumes the standby lights")
             frames, ack, ack_index = blackout(False)

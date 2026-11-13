@@ -9,6 +9,7 @@ bool DroneShowLED_Debug::set_raw_rgbw(uint8_t red, uint8_t green, uint8_t blue, 
     uint32_t now = AP_HAL::millis();
 
     if (now - last_sent_at >= 100) {
+        last_sent_at = now;
         gcs().send_text(MAV_SEVERITY_INFO, "%02X%02X%02X%02X", red, green, blue, white);
         return true;
     } else {
