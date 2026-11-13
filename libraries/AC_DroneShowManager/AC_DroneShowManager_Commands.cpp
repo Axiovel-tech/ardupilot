@@ -127,7 +127,8 @@ MAV_RESULT AC_DroneShowManager::handle_command_int_packet(const mavlink_command_
             // param2 < 0.5 cancels the latch after an aborted power-off.
             //
             // The COMMAND_ACK generated from this result is the companion
-            // computer's cue that it is safe to cut the rail.
+            // computer's cue that it is safe to cut the rail, so the black
+            // frame is handed to the LEDs before the result is returned.
             if (packet.param2 >= 0.5f) {
                 if (AP_Notify::flags.armed || AP_Notify::flags.flying) {
                     // A power-off is never legitimate while armed; refuse
@@ -135,6 +136,7 @@ MAV_RESULT AC_DroneShowManager::handle_command_int_packet(const mavlink_command_
                     return MAV_RESULT_DENIED;
                 }
                 _shutdown_blackout_until_msec = AP_HAL::millis() + SHUTDOWN_BLACKOUT_TIMEOUT_MSEC;
+                _update_lights();
             } else {
                 _shutdown_blackout_until_msec = 0;
             }

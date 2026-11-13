@@ -128,6 +128,14 @@ public:
     }
 
     /**
+     * Makes the next set_rgb() or set_rgbw() call send its color to the
+     * device even if it is the same as the last color sent.
+     */
+    void resend_next_color() {
+        _reset_repeat_count();
+    }
+
+    /**
      * Returns whether the LED supports the W channel. LEDs that do not support
      * the W channel will ignore whatever value is sent to them on the white
      * channel. It is the responsibility of the caller to ensure that the W
