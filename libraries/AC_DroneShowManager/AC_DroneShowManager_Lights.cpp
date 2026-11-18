@@ -280,6 +280,7 @@ void AC_DroneShowManager::_update_lights()
     float elapsed_time;
     float pulse = 0.0f;
     float factor;
+    const bool shutdown_blackout = _shutdown_blackout_active();
 
 #define IS_LANDING(mode) (  \
     mode == MODE_LAND ||    \
@@ -300,9 +301,10 @@ void AC_DroneShowManager::_update_lights()
     // A shutdown blackout (companion computer about to cut our power rail;
     // MAV_CMD_USER_2 sub-command 2) trumps everything: the LED strip stays
     // powered when this MCU goes down, so whatever color survives here is
-    // what the dark drone keeps displaying. Keep repainting black until the
-    // power actually dies (or the latch expires / is cancelled).
-    if (_shutdown_blackout_active()) {
+    // what the dark drone keeps displaying. Keep repainting black on every
+    // update until the power actually dies (or the latch expires / is
+    // cancelled).
+    if (shutdown_blackout) {
         color = Colors::BLACK;
         light_signal_affected_by_brightness_setting = false;
     } else
@@ -592,7 +594,7 @@ void AC_DroneShowManager::_update_lights()
     // matters. When colors change on every tick (show playback), pushes
     // settle on the same every-other-tick 25 Hz cadence as before.
     const uint32_t now_push_msec = AP_HAL::millis();
-    if (now_push_msec - _last_rgb_led_push_at_msec >= LED_PUSH_MIN_INTERVAL_MSEC) {
+    if (shutdown_blackout || now_push_msec - _last_rgb_led_push_at_msec >= LED_PUSH_MIN_INTERVAL_MSEC) {
 
     bool flush_needed[RGB_LED_OUTPUT_COUNT];
     bool any_frame_pushed = false;
@@ -610,6 +612,10 @@ void AC_DroneShowManager::_update_lights()
         // No need to test whether the RGB values or the gamma correction
         // changed because the LED classes do this on their own
         rgb_led->set_gamma(_params.led_specs[i].gamma);
+
+        if (shutdown_blackout) {
+            rgb_led->resend_next_color();
+        }
 
         if (rgb_led->supports_white_channel()) {
             // Code path for LEDs that support a white channel
