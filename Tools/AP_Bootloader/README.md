@@ -34,15 +34,27 @@ Boards with `AP_BOOTLOADER_FLASH_FROM_SD_ENABLED` accept an application image
 at `/ardupilot.abin`. The bootloader uses these marker names:
 
 - `/ardupilot-verify.abin` means verification is in progress and can restart.
-- `/ardupilot-flash.abin` means flashing is in progress. A retry erases the
-  application area and writes the complete image again.
+- `/ardupilot-flash.abin` means flashing started and no result was recorded,
+  which only a reset or power loss during the flash leaves behind.
 - `/ardupilot-flashed.abin` is terminal success.
 - `/ardupilot-failed.abin` is terminal rejection. A new update must replace it.
 
-The bootloader checks the ABIN MD5 before erasing the application. It checks
-the flashed application's board ID, length and CRC before marking success. A
-transient erase, write, validation or SD read error leaves the flash marker in
-place for the next boot.
+Before erasing the application the bootloader reads the whole file and checks
+the ABIN MD5 and, with `AP_CHECK_FIRMWARE_ENABLED`, the image's application
+descriptor: its signature, board ID, length, both CRCs and that the image fits
+the application area. These are the tests `check_good_firmware()` applies to
+flash, so an image that could not boot is renamed to the failed marker while
+the installed application is still intact. Only the descriptor format of the
+bootloader build (unsigned or signed) is accepted, and a firmware signature is
+still only checked after the write. An SD read error during this pass leaves
+the marker in place for the next boot, as nothing has been erased.
+
+Every failure the bootloader sees after it starts erasing (erase, write, SD
+read or the final `check_good_firmware()`) is terminal and renames the file to
+the failed marker. A leftover flash marker is resumed only when the installed
+application is invalid, which is what an interrupted flash leaves. If the
+installed application is valid, it is never erased for a leftover flash marker:
+the file is marked flashed when it is that same image, and failed otherwise.
 
 If an SD update does not complete, the bootloader returns to the installed
 application only when its descriptor, board ID, length and CRC still validate.

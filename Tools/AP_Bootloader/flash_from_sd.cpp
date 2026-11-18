@@ -90,6 +90,15 @@ void mark_failed(const char *path)
     f_rename(path, FAILED_PATH);
 }
 
+bool installed_firmware_ok()
+{
+#if AP_CHECK_FIRMWARE_ENABLED
+    return check_good_firmware() == check_fw_result_t::CHECK_FW_OK;
+#else
+    return false;
+#endif
+}
+
 class ABinParser {
 public:
     explicit ABinParser(const char *_path) : path(_path) {}
@@ -261,6 +270,86 @@ out:
     return result;
 }
 
+#if AP_CHECK_FIRMWARE_ENABLED
+#if AP_SIGNED_FIRMWARE
+constexpr uint8_t DESCRIPTOR_SIGNATURE[] = AP_APP_DESCRIPTOR_SIGNATURE_SIGNED;
+#else
+constexpr uint8_t DESCRIPTOR_SIGNATURE[] = AP_APP_DESCRIPTOR_SIGNATURE_UNSIGNED;
+#endif
+
+/*
+  apply the tests of check_good_firmware() to an image as it is read,
+  so a bad image is rejected while the installed application is intact
+ */
+class AppDescriptorCheck {
+public:
+    void update(const uint8_t *bytes, uint32_t nbytes)
+    {
+        uint32_t used = 0;
+        // the signature and the descriptor can each span several calls
+        while (descriptor_length == 0 && used < nbytes) {
+            memmove(descriptor.sig, &descriptor.sig[1], sizeof(descriptor.sig) - 1U);
+            descriptor.sig[sizeof(descriptor.sig) - 1U] = bytes[used++];
+            if (memcmp(descriptor.sig, DESCRIPTOR_SIGNATURE, sizeof(descriptor.sig)) == 0) {
+                descriptor_length = sizeof(descriptor.sig);
+            }
+        }
+        crc1 = crc32_small(crc1, bytes, used);
+
+        while (descriptor_length != 0 && descriptor_length < sizeof(descriptor) &&
+               used < nbytes) {
+            reinterpret_cast<uint8_t *>(&descriptor)[descriptor_length++] = bytes[used++];
+            if (descriptor_length == sizeof(descriptor)) {
+                start_crc2(image_size + used);
+            }
+        }
+
+        const uint32_t crc2_size = MIN(nbytes - used, crc2_remaining);
+        crc2 = crc32_small(crc2, &bytes[used], crc2_size);
+        crc2_remaining -= crc2_size;
+        image_size += nbytes;
+    }
+
+    bool valid() const
+    {
+        bool board_ok = descriptor.board_id == APJ_BOARD_ID;
+#ifdef ALT_BOARD_ID
+        board_ok |= descriptor.board_id == ALT_BOARD_ID;
+#endif
+        return descriptor_complete && board_ok && crc2_remaining == 0 &&
+               ((image_size + 127U) & ~127U) <= board_info.fw_size &&
+               crc1 == descriptor.image_crc1 && crc2 == descriptor.image_crc2;
+    }
+
+    bool is_installed_image() const
+    {
+        const app_descriptor_t *installed = get_app_descriptor();
+        return installed != nullptr &&
+               memcmp(installed, &descriptor, sizeof(descriptor)) == 0;
+    }
+
+private:
+    void start_crc2(uint32_t descriptor_end)
+    {
+        if (descriptor.image_size < descriptor_end) {
+            return;
+        }
+        constexpr uint32_t CRC2_OFFSET = offsetof(app_descriptor_t, version_major);
+        crc2 = crc32_small(0, &descriptor.version_major, sizeof(descriptor) - CRC2_OFFSET);
+        crc2_remaining = descriptor.image_size - descriptor_end;
+        descriptor_complete = true;
+    }
+
+    app_descriptor_t descriptor {};
+    uint32_t descriptor_length = 0;
+    uint32_t image_size = 0;
+    uint32_t crc1 = 0;
+    uint32_t crc2 = 0;
+    uint32_t crc2_remaining = 0;
+    bool descriptor_complete = false;
+};
+#endif // AP_CHECK_FIRMWARE_ENABLED
+
 class ABinVerifier : public ABinParser {
 public:
     using ABinParser::ABinParser;
@@ -278,9 +367,23 @@ public:
 
         uint8_t calculated_md5[16];
         MD5Final(calculated_md5, &md5_context);
-        return memcmp(calculated_md5, expected_md5, sizeof(calculated_md5)) == 0 ?
-               ABinValidationResult::VALID : ABinValidationResult::INVALID;
+        if (memcmp(calculated_md5, expected_md5, sizeof(calculated_md5)) != 0) {
+            return ABinValidationResult::INVALID;
+        }
+#if AP_CHECK_FIRMWARE_ENABLED
+        if (!descriptor_check.valid()) {
+            return ABinValidationResult::INVALID;
+        }
+#endif
+        return ABinValidationResult::VALID;
     }
+
+#if AP_CHECK_FIRMWARE_ENABLED
+    bool is_installed_image() const
+    {
+        return descriptor_check.is_installed_image();
+    }
+#endif
 
 protected:
     void name_value_callback(const char *name, const char *value) override
@@ -309,12 +412,18 @@ protected:
     {
         if (nbytes > 0) {
             MD5Update(&md5_context, bytes, nbytes);
+#if AP_CHECK_FIRMWARE_ENABLED
+            descriptor_check.update(bytes, nbytes);
+#endif
         }
     }
 
 private:
     uint8_t expected_md5[16] {};
     MD5Context md5_context;
+#if AP_CHECK_FIRMWARE_ENABLED
+    AppDescriptorCheck descriptor_check;
+#endif
     bool has_expected_md5 = false;
     bool invalid_header = false;
 };
@@ -398,6 +507,7 @@ FlashFromSDResult flash_from_sd()
     ABinFlasher *flasher = nullptr;
     ABinValidationResult validation = ABinValidationResult::IO_ERROR;
     bool update_found = false;
+    bool is_installed_image = false;
     const char *path = find_pending_update(update_found);
     if (path == nullptr) {
         if (update_found) {
@@ -412,11 +522,13 @@ FlashFromSDResult flash_from_sd()
         goto out;
     }
     validation = verifier->run();
+#if AP_CHECK_FIRMWARE_ENABLED
+    is_installed_image = verifier->is_installed_image();
+#endif
     delete verifier;
     verifier = nullptr;
     if (validation != ABinValidationResult::VALID) {
-        if (validation == ABinValidationResult::INVALID &&
-            strcmp(path, VERIFY_PATH) == 0) {
+        if (validation == ABinValidationResult::INVALID) {
             mark_failed(path);
         }
         goto out;
@@ -426,16 +538,28 @@ FlashFromSDResult flash_from_sd()
         if (f_rename(VERIFY_PATH, FLASH_PATH) != FR_OK) {
             goto out;
         }
-        path = FLASH_PATH;
+    } else if (installed_firmware_ok()) {
+        // An interrupted flash leaves an invalid application. A valid one
+        // beside the flash marker means that flash completed, or the
+        // application was replaced since, so it must not be erased.
+        if (is_installed_image) {
+            goto flashed;
+        }
+        mark_failed(FLASH_PATH);
+        goto out;
     }
 
-    flasher = NEW_NOTHROW ABinFlasher{path};
+    // Every failure seen from here on is terminal. Only a reset or power
+    // loss leaves the flash marker behind for the next boot to resume.
+    flasher = NEW_NOTHROW ABinFlasher{FLASH_PATH};
     if (flasher == nullptr || !flasher->run()) {
+        mark_failed(FLASH_PATH);
         goto out;
     }
     delete flasher;
     flasher = nullptr;
 
+flashed:
     f_unlink(FLASHED_PATH);
     if (f_rename(FLASH_PATH, FLASHED_PATH) == FR_OK) {
         result = FlashFromSDResult::FLASHED;
