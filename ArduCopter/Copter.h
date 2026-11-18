@@ -758,13 +758,13 @@ private:
 
     // if AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED
     struct RateControllerRates {
-        uint8_t fast_logging_rate;
-        uint8_t medium_logging_rate;
-        uint8_t filter_rate;
-        uint8_t main_loop_rate;
+        uint16_t fast_logging_rate;
+        uint16_t medium_logging_rate;
+        uint16_t filter_rate;
+        uint16_t main_loop_rate;
     };
 
-    uint8_t calc_gyro_decimation(uint8_t gyro_decimation, uint16_t rate_hz);
+    uint16_t calc_gyro_decimation(uint8_t gyro_decimation, uint16_t rate_hz);
     void rate_controller_thread();
     void rate_controller_filter_update();
     void rate_controller_log_update();
