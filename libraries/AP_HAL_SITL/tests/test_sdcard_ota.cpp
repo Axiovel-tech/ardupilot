@@ -79,7 +79,7 @@ TEST(SDCardOTA, MovesInputToFlashedMarker)
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
 }
 
-TEST(SDCardOTA, MarksAnInjectedFailure)
+TEST(SDCardOTA, RejectsAnImageBeforeTheFlashStage)
 {
     TemporaryDirectory directory;
     directory.create("ardupilot.abin");
@@ -87,6 +87,15 @@ TEST(SDCardOTA, MarksAnInjectedFailure)
 
     emulate_sdcard_ota();
     EXPECT_TRUE(directory.exists("ardupilot-failed.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-verify.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-flash.abin"));
+
+    // a rejected image is terminal: later boots leave it alone
+    unsetenv("AXIO_SIM_SD_OTA_RESULT");
+    emulate_sdcard_ota();
+    EXPECT_TRUE(directory.exists("ardupilot-failed.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-flashed.abin"));
 }
 
 TEST(SDCardOTA, ResumesAnInterruptedFlash)
@@ -124,15 +133,21 @@ TEST(SDCardOTA, GivesFlashMarkerPriority)
     EXPECT_TRUE(directory.exists("ardupilot-flashed.abin"));
 }
 
-TEST(SDCardOTA, RetainsFlashMarkerAfterInjectedFailure)
+TEST(SDCardOTA, FailsAFlashMarkerTerminallyAfterInjectedFailure)
 {
     TemporaryDirectory directory;
     directory.create("ardupilot-flash.abin");
     setenv("AXIO_SIM_SD_OTA_RESULT", "failure", 1);
 
     emulate_sdcard_ota();
-    EXPECT_TRUE(directory.exists("ardupilot-flash.abin"));
-    EXPECT_FALSE(directory.exists("ardupilot-failed.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-flash.abin"));
+    EXPECT_TRUE(directory.exists("ardupilot-failed.abin"));
+
+    // nothing is left for the next boot to retry
+    unsetenv("AXIO_SIM_SD_OTA_RESULT");
+    emulate_sdcard_ota();
+    EXPECT_TRUE(directory.exists("ardupilot-failed.abin"));
+    EXPECT_FALSE(directory.exists("ardupilot-flashed.abin"));
 }
 
 TEST(SDCardOTA, DoesNothingWithoutAnUpdate)

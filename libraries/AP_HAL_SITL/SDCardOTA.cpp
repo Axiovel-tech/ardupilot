@@ -64,18 +64,17 @@ void emulate_sdcard_ota()
         return;
     }
 
+    // The bootloader rejects an image before it erases anything, and every
+    // failure it sees while flashing is terminal as well.
     if (requested_result("failure")) {
-        if (strcmp(path, VERIFY_PATH) == 0 && move_file(path, FAILED_PATH)) {
+        if (move_file(path, FAILED_PATH)) {
             fprintf(stderr, "AXIO_SIM_SD_OTA: emulated update rejection\n");
         }
         return;
     }
 
-    if (strcmp(path, VERIFY_PATH) == 0) {
-        if (!move_file(VERIFY_PATH, FLASH_PATH)) {
-            return;
-        }
-        path = FLASH_PATH;
+    if (strcmp(path, VERIFY_PATH) == 0 && !move_file(VERIFY_PATH, FLASH_PATH)) {
+        return;
     }
 
     if (requested_result("interrupted")) {
