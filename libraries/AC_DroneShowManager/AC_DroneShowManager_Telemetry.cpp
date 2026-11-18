@@ -14,6 +14,8 @@ static const AC_DroneShowManager::TelemetryRequest default_telemetry_stream[] = 
     { MSG_LOCATION, 500 },           // GLOBAL_POSITION_INT, 2 Hz
     { MSG_SYS_STATUS, 1000 },        // SYS_STATUS, 1 Hz
     { MSG_GPS_RAW, 1000 },           // GPS_RAW_INT, 1 Hz
+    { MSG_SCALED_IMU, 1000 },        // SCALED_IMU, 1 Hz: IMU 0, die temperature for the pre-show health check
+    { MSG_SCALED_IMU2, 1000 },       // SCALED_IMU2, 1 Hz: IMU 1, likewise
     NO_MORE_MESSAGES
 };
 
