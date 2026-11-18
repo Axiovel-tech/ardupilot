@@ -542,6 +542,7 @@ void ModeDroneShow::takeoff_start()
     }
 
     // set the target altitude of the takeoff
+    _takeoff_start_alt_above_origin_cm = current_alt;
     target_alt = current_alt + show_manager.get_takeoff_altitude_cm();
 
     // the body of this function from here on is mostly adapted from
@@ -651,23 +652,26 @@ bool ModeDroneShow::takeoff_completed() const
     if (_stage == DroneShow_Takeoff) {
         if (_next_stage_after_takeoff == DroneShow_Performing) {
             /* Next step will start following the show trajectory. We can safely
-             * enter that stage if we have reached 70% of our takeoff altitude
+             * enter that stage if we have climbed 60% of our takeoff altitude
              * _and_ the desired altitude of the show trajectory at that time
              * is above the takeoff altitude to prevent temporarily stopping the
              * drone at the takeoff altitude */
             Location loc;
+            int32_t altitude_above_origin_cm;
             int32_t altitude_above_home_cm;
             int32_t desired_altitude_above_home_cm;
             AC_DroneShowManager* show_manager = &copter.g2.drone_show_manager;
 
             if (
                 show_manager->get_current_location(loc) &&
+                loc.get_alt_cm(Location::AltFrame::ABOVE_ORIGIN, altitude_above_origin_cm) &&
                 loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, altitude_above_home_cm)
             )
             {
-                if (altitude_above_home_cm >= 0.7 * show_manager->get_takeoff_altitude_cm())
+                const int32_t climbed_cm = altitude_above_origin_cm - _takeoff_start_alt_above_origin_cm;
+                if (climbed_cm >= 0.6 * show_manager->get_takeoff_altitude_cm())
                 {
-                    // Altitude above home seems high enough, but is the trajectory
+                    // We have climbed high enough, but is the trajectory
                     // already ahead of us?
                     float elapsed = show_manager->get_elapsed_time_since_start_sec();
                     if (!show_manager->get_desired_global_position_at_seconds(elapsed, loc))
@@ -692,7 +696,7 @@ bool ModeDroneShow::takeoff_completed() const
                 }
                 else
                 {
-                    // We are not above 70% of the takeoff altitude, so we continue
+                    // We have not climbed 60% of the takeoff altitude, so we continue
                     // the takeoff procedure to rise higher.
                     return false;
                 }

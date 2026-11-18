@@ -112,7 +112,7 @@ PSC_D_ACC_SMAX,0.08
 PSC_JERK_NE,20
 PSC_JERK_D,20
 PSC_NE_POS_P,1
-PSC_D_POS_P,1
+PSC_D_POS_P,1.5
 PSC_NE_VEL_D,0.25
 PSC_NE_VEL_FF,0.1
 PSC_NE_VEL_FLTD,20
@@ -168,7 +168,7 @@ EK3_SRC3_YAW,0
 EK3_SRC_OPTIONS,0
 EK3_SRC_VC_YAW,0
 VISO_TYPE,1
-VISO_DELAY_MS,10
+VISO_DELAY_MS,20
 VISO_ORIENT,0
 VISO_POS_M_NSE,0.12
 VISO_POS_X,0
@@ -288,6 +288,14 @@ SERIAL7_PROTOCOL,-1
 SERIAL7_BAUD,115
 SERIAL8_PROTOCOL,2
 SERIAL8_BAUD,921
+
+# The tag's position link (SERIAL4) is private: without this, ArduPilot routes
+# the tag's 50 Hz VISION_POSITION_ESTIMATE and show clock out of every other
+# MAVLink port, so they reach the ground over the tag's Wi-Fi bridge (SERIAL8).
+# Messages addressed to the tag still reach it. MAVn numbers the MAVLink serial
+# ports in order (SERIAL0, 3, 4, 8), so this is MAV3 only while SERIAL3 stays
+# MAVLink.
+MAV3_OPTIONS,2
 
 # Drone show behavior: start scheduled on the tag's show clock and run on the
 # internal clock (indoor, no GPS), 1 m show takeoff altitude, and 50 Hz

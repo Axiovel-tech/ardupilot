@@ -1,0 +1,12 @@
+# AXIOLIGHT-REVB without a barometer; vertical position from external navigation only
+
+include ../AXIOLIGHT-REVB/hwdef.dat
+
+USE_BOOTLOADER_FROM_BOARD AXIOLIGHT-REVB
+
+undef BARO
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+define AP_BARO_PROBE_EXTERNAL_I2C_BUSES 0
+define AP_BARO_BACKEND_DEFAULT_ENABLED 0
+# The baro frontend stays compiled because ADS-B depends on it at compile time;
+# with no probes or backends it has zero instances.

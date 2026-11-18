@@ -24,6 +24,7 @@ private:
     const uint16_t convergence_loops;
     int64_t link_offset_usec;
     int64_t min_sample_us;
+    uint64_t last_offboard_usec;
     bool initialised;
     uint16_t min_sample_counter;
 };

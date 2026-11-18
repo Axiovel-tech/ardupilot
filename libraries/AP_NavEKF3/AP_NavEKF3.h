@@ -512,7 +512,7 @@ private:
     const uint16_t fusionTimeStep_ms = 10;         // The minimum time interval between covariance predictions and measurement fusions in msec
     const uint8_t sensorIntervalMin_ms = 50;       // The minimum allowed time between measurements from any non-IMU sensor (msec)
     const uint8_t flowIntervalMin_ms = 20;         // The minimum allowed time between measurements from optical flow sensors (msec)
-    const uint8_t extNavIntervalMin_ms = 20;       // The minimum allowed time between measurements from external navigation sensors (msec)
+    const uint8_t extNavIntervalMin_ms = 10;       // The minimum allowed time between measurements from external navigation sensors (msec)
     const float maxYawEstVelInnov = 2.0f;          // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
     const uint16_t deadReckonDeclare_ms = 1000;    // Time without equivalent position or velocity observation to constrain drift before dead reckoning is declared (msec)
     const uint16_t gpsNoFixTimeout_ms = 2000;      // Time without a fix required to reset GPS alignment checks when EK3_OPTIONS bit 0 is set (msec)

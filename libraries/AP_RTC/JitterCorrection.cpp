@@ -51,6 +51,14 @@ uint64_t JitterCorrection::correct_offboard_timestamp_usec(uint64_t offboard_use
 {
     int64_t diff_us = int64_t(local_usec) - int64_t(offboard_usec);
 
+    if (initialised && offboard_usec + max_lag_ms*1000U < last_offboard_usec) {
+        // the remote clock went back by more than any lag we accept: the
+        // remote system restarted, so the old offset and minimum are invalid
+        initialised = false;
+        min_sample_counter = 0;
+    }
+    last_offboard_usec = offboard_usec;
+
     if (!initialised ||
         diff_us < link_offset_usec) {
         // this message arrived from the remote system with a
