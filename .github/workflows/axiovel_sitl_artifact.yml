@@ -142,7 +142,7 @@ jobs:
           retention-days: 14
 
   axiolight-revb-copter:
-    name: Build and publish AXIOLIGHT-REVB Copter
+    name: Build and publish AXIOLIGHT-REVB Copter (with and without barometer)
     runs-on: [self-hosted, Linux, X64, axio-sitl]
     timeout-minutes: 120
 
@@ -224,27 +224,35 @@ jobs:
               cp build/AXIOLIGHT-REVB/bin/AP_Bootloader.bin \
                 Tools/bootloaders/AXIOLIGHT-REVB_bl.bin
 
-              ./waf configure --board AXIOLIGHT-REVB --no-submodule-update
-              ./waf copter -j2
-              mkdir -p artifacts/axiolight-revb-copter
-              cp build/AXIOLIGHT-REVB/bin/arducopter.apj \
-                artifacts/axiolight-revb-copter/arducopter.apj
-              python3 Tools/scripts/verify_embedded_bootloader.py \
-                --apj artifacts/axiolight-revb-copter/arducopter.apj \
-                --romfs-header build/AXIOLIGHT-REVB/ap_romfs_embedded.h \
-                --bootloader artifacts/axiolight-revb-bootloader/bootloader.bin
-
-              # First-time OTA provisioning must install the checking
-              # bootloader and a descriptor-enabled application together.
+              # AXIOLIGHT-REVB-NOBARO is the variant the fleet flies. It includes
+              # the REVB hwdef (so it inherits the OTA changes and board ID
+              # 1177) and embeds the REVB bootloader through
+              # USE_BOOTLOADER_FROM_BOARD, so one bootloader serves both.
               python3 -m pip install --disable-pip-version-check --no-cache-dir \
                 --target /tmp/axiovel-intelhex intelhex==2.3.0
-              PYTHONPATH=/tmp/axiovel-intelhex python3 Tools/scripts/make_intel_hex.py \
-                build/AXIOLIGHT-REVB/bin/arducopter.bin \
-                Tools/bootloaders/AXIOLIGHT-REVB_bl.bin 384
-              test -f build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex
-              mkdir -p artifacts/axiolight-revb-provisioning
-              cp build/AXIOLIGHT-REVB/bin/arducopter_with_bl.hex \
-                artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex
+
+              for board in AXIOLIGHT-REVB AXIOLIGHT-REVB-NOBARO; do
+                slug=$(echo "$board" | tr "[:upper:]" "[:lower:]")
+                ./waf configure --board "$board" --no-submodule-update
+                ./waf copter -j2
+                mkdir -p "artifacts/$slug-copter"
+                cp "build/$board/bin/arducopter.apj" \
+                  "artifacts/$slug-copter/arducopter.apj"
+                python3 Tools/scripts/verify_embedded_bootloader.py \
+                  --apj "artifacts/$slug-copter/arducopter.apj" \
+                  --romfs-header "build/$board/ap_romfs_embedded.h" \
+                  --bootloader artifacts/axiolight-revb-bootloader/bootloader.bin
+
+                # First-time OTA provisioning must install the checking
+                # bootloader and a descriptor-enabled application together.
+                PYTHONPATH=/tmp/axiovel-intelhex python3 Tools/scripts/make_intel_hex.py \
+                  "build/$board/bin/arducopter.bin" \
+                  Tools/bootloaders/AXIOLIGHT-REVB_bl.bin 384
+                test -f "build/$board/bin/arducopter_with_bl.hex"
+                mkdir -p "artifacts/$slug-provisioning"
+                cp "build/$board/bin/arducopter_with_bl.hex" \
+                  "artifacts/$slug-provisioning/$slug-provisioning.hex"
+              done
 
               ccache -s
               ccache -z
@@ -256,29 +264,13 @@ jobs:
           set -euo pipefail
           built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          app_sha=$(sha256sum artifacts/axiolight-revb-copter/arducopter.apj | cut -d' ' -f1)
           bootloader_sha=$(sha256sum artifacts/axiolight-revb-bootloader/bootloader.bin | cut -d' ' -f1)
-          provisioning_sha=$(sha256sum artifacts/axiolight-revb-provisioning/axiolight-revb-provisioning.hex | cut -d' ' -f1)
-
-          cat > artifacts/axiolight-revb-copter/manifest.json <<EOF
-          {
-            "vehicle": "copter",
-            "board": "AXIOLIGHT-REVB",
-            "board_id": 1177,
-            "git_sha": "${GITHUB_SHA}",
-            "git_ref": "${GITHUB_REF_NAME}",
-            "run_id": "${GITHUB_RUN_ID}",
-            "run_url": "${run_url}",
-            "built_at": "${built_at}",
-            "file": "arducopter.apj",
-            "sha256": "${app_sha}"
-          }
-          EOF
 
           cat > artifacts/axiolight-revb-bootloader/manifest.json <<EOF
           {
             "vehicle": "bootloader",
             "board": "AXIOLIGHT-REVB",
+            "boards": ["AXIOLIGHT-REVB", "AXIOLIGHT-REVB-NOBARO"],
             "board_id": 1177,
             "git_sha": "${GITHUB_SHA}",
             "git_ref": "${GITHUB_REF_NAME}",
@@ -290,22 +282,46 @@ jobs:
           }
           EOF
 
-          cat > artifacts/axiolight-revb-provisioning/manifest.json <<EOF
+          # Both boards share board ID 1177, so the bootloader accepts either
+          # image on either drone. "board" is the only field that tells them
+          # apart: check it before flashing.
+          for board in AXIOLIGHT-REVB AXIOLIGHT-REVB-NOBARO; do
+            slug=$(echo "$board" | tr '[:upper:]' '[:lower:]')
+            app_sha=$(sha256sum "artifacts/$slug-copter/arducopter.apj" | cut -d' ' -f1)
+            provisioning_sha=$(sha256sum "artifacts/$slug-provisioning/$slug-provisioning.hex" | cut -d' ' -f1)
+
+            cat > "artifacts/$slug-copter/manifest.json" <<EOF
           {
-            "vehicle": "provisioning",
-            "board": "AXIOLIGHT-REVB",
+            "vehicle": "copter",
+            "board": "${board}",
             "board_id": 1177,
             "git_sha": "${GITHUB_SHA}",
             "git_ref": "${GITHUB_REF_NAME}",
             "run_id": "${GITHUB_RUN_ID}",
             "run_url": "${run_url}",
             "built_at": "${built_at}",
-            "file": "axiolight-revb-provisioning.hex",
+            "file": "arducopter.apj",
+            "sha256": "${app_sha}"
+          }
+          EOF
+
+            cat > "artifacts/$slug-provisioning/manifest.json" <<EOF
+          {
+            "vehicle": "provisioning",
+            "board": "${board}",
+            "board_id": 1177,
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "${run_url}",
+            "built_at": "${built_at}",
+            "file": "${slug}-provisioning.hex",
             "sha256": "${provisioning_sha}",
             "bootloader_sha256": "${bootloader_sha}",
             "application_apj_sha256": "${app_sha}"
           }
           EOF
+          done
 
       - name: Upload AXIOLIGHT-REVB Copter firmware
         uses: actions/upload-artifact@v4
@@ -328,6 +344,22 @@ jobs:
         with:
           name: axiolight-revb-provisioning
           path: artifacts/axiolight-revb-provisioning
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AXIOLIGHT-REVB-NOBARO Copter firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-nobaro-copter
+          path: artifacts/axiolight-revb-nobaro-copter
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AXIOLIGHT-REVB-NOBARO provisioning image
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiolight-revb-nobaro-provisioning
+          path: artifacts/axiolight-revb-nobaro-provisioning
           if-no-files-found: error
           retention-days: 30
 
