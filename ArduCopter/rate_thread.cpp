@@ -150,12 +150,12 @@
 
 #define DIV_ROUND_INT(x, d) ((x + d/2) / d)
 
-uint8_t Copter::calc_gyro_decimation(uint8_t gyro_decimation, uint16_t rate_hz)
+uint16_t Copter::calc_gyro_decimation(uint8_t gyro_decimation, uint16_t rate_hz)
 {
-    return MAX(uint8_t(DIV_ROUND_INT(ins.get_raw_gyro_rate_hz() / gyro_decimation, rate_hz)), 1U);
+    return MAX(uint16_t(DIV_ROUND_INT(ins.get_raw_gyro_rate_hz() / gyro_decimation, rate_hz)), 1U);
 }
 
-static inline bool run_decimated_callback(uint8_t decimation_rate, uint8_t& decimation_count)
+static inline bool run_decimated_callback(uint16_t decimation_rate, uint16_t& decimation_count)
 {
     return decimation_rate > 0 && ++decimation_count >= decimation_rate;
 }
@@ -203,10 +203,10 @@ void Copter::rate_controller_thread()
 
     // run the filters at half the gyro rate
 #if HAL_LOGGING_ENABLED
-    uint8_t log_loop_count = 0;
+    uint16_t log_loop_count = 0;
 #endif
-    uint8_t main_loop_count = 0;
-    uint8_t filter_loop_count = 0;
+    uint16_t main_loop_count = 0;
+    uint16_t filter_loop_count = 0;
 
     while (true) {
 
