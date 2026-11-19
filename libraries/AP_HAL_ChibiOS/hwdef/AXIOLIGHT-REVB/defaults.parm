@@ -310,3 +310,15 @@ SHOW_LED0_TYPE,15
 SHOW_LED1_CHAN,6
 SHOW_LED1_COUNT,24
 SHOW_LED1_TYPE,15
+
+# Logging: flight logs only, small enough to download over the tag's Wi-Fi.
+# ATTITUDE_MED without ATTITUDE_FAST: attitude, rate and PID at 10 Hz.
+# Ground (disarmed) and EKF replay logging are off; turn them on only on the
+# drone that needs them (LOG_DISARMED 1, LOG_REPLAY 1) and off again after.
+# LOG_FILE_RATEMAX caps streaming log messages at 60 Hz: ESC telemetry drops
+# from 100 to 50 Hz per motor; IMU (25 Hz per IMU) and the 10 Hz messages are not
+# affected. Set it to 0 for a tuning flight with ATTITUDE_FAST.
+LOG_BITMASK,180222
+LOG_DISARMED,0
+LOG_REPLAY,0
+LOG_FILE_RATEMAX,60
