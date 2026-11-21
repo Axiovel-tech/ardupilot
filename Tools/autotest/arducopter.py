@@ -13776,6 +13776,95 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.context_pop()
             self.reboot_sitl()
 
+    def DroneShowGdmb(self):
+        '''fly a certified .gdmb in SHOW mode to the landing and track it'''
+        # Drone d001 of QUARTET as axio-e2e flies it (specs/shows/quartet.gdm),
+        # certified by axio-trajectory-engine
+        with open(os.path.join(testdir, self.current_test_name_directory, "quartet-d001.gdmb"), "rb") as f:
+            gdmb = f.read()
+        show_hash = "e30a8915c56ea4aa22da898dbb1a169eb68e65070d43f6b763499869b171f344"
+        pad = (-0.4, -0.4)  # show frame (NWU) start of d001
+        # design position at show time, in the show frame
+        design = {
+            15: (0.264, -1.578, 1.600),
+            20: (1.556, 0.689, 2.272),
+            25: (-1.248, 1.325, 3.504),
+            30: (-1.739, -0.720, 2.908),
+            35: (-1.347, -1.340, 1.318),
+        }
+        end_s = 40
+
+        self.context_push()
+        os.makedirs("axio", exist_ok=True)
+        with open(os.path.join("axio", "show.bin"), "wb") as f:
+            f.write(gdmb)
+        self.wait_ready_to_arm()
+        here = self.assert_receive_message('GLOBAL_POSITION_INT')
+        # the show origin that puts d001's pad under the vehicle (orientation 0: north = x, east = -y)
+        origin = self.offset_location_ne(
+            mavutil.location(here.lat * 1e-7, here.lon * 1e-7, 0, 0), -pad[0], pad[1])
+        self.set_parameters({
+            "SHOW_ORIGIN_LAT": int(round(origin.lat * 1e7)),
+            "SHOW_ORIGIN_LNG": int(round(origin.lng * 1e7)),
+            "SHOW_ORIENTATION": 0,
+            "SHOW_TAKEOFF_ALT": 1,  # the AXIOLIGHT-REVB default, the show's own takeoff height
+            "SHOW_OPTIONS": 8,  # SHRF
+        })
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        try:
+            self.schedule_drone_show(20)
+            self.wait_armed(timeout=30)
+            self.wait_disarmed(timeout=150)
+
+            dfreader = self.dfreader_for_current_onboard_log()
+            show, identity, sources = [], [], set()
+            while True:
+                m = dfreader.recv_match(type=['SHOW', 'SHID', 'SHRF'])
+                if m is None:
+                    break
+                if m.get_type() == 'SHOW':
+                    show.append(m)
+                elif m.get_type() == 'SHID':
+                    identity.append((m.Fmt, m.Hash))
+                else:
+                    sources.add((m.Src, m.FF & 1))
+
+            if (2, show_hash) not in identity:
+                raise NotAchievedException("SHID does not name the .gdmb show: %s" % str(identity))
+            if sources != {(1, 1)}:
+                raise NotAchievedException(
+                    "SHRF (source, feed-forward) should all be (1, 1), the .gdmb with feed-forward: %s" %
+                    str(sources))
+
+            performing = [m for m in show if m.Stage == self.DRONE_SHOW_STAGE_PERFORMING]
+            if not performing or performing[-1].ClockMS < (end_s - 1) * 1000:
+                raise NotAchievedException("SHOW did not perform to the end of the trajectory (last %s ms)" %
+                                           (performing[-1].ClockMS if performing else None))
+
+            for t, expected in design.items():
+                sample = min(performing, key=lambda m: abs(m.ClockMS - t * 1000))
+                error = math.dist((sample.X, sample.Y, sample.Z), expected)
+                if abs(sample.ClockMS - t * 1000) > 100 or error > 0.05:
+                    raise NotAchievedException(
+                        "desired position at %u s is %.3f m from the design (sample at %u ms)" %
+                        (t, error, sample.ClockMS))
+
+            def p95(values):
+                values = sorted(values)
+                return values[int(0.95 * (len(values) - 1))]
+            horizontal = [abs(m.HDist) for m in performing]
+            vertical = [abs(m.VDist) for m in performing]
+            self.progress("Tracking p95 %.3f m horizontal, %.3f m vertical; max %.3f / %.3f m" %
+                          (p95(horizontal), p95(vertical), max(horizontal), max(vertical)))
+            if p95(horizontal) > 0.3 or p95(vertical) > 0.3 or max(horizontal) > 0.6 or max(vertical) > 0.6:
+                raise NotAchievedException("tracking error above 0.3 m (p95) or 0.6 m (max)")
+        finally:
+            os.remove(os.path.join("axio", "show.bin"))
+            self.disarm_vehicle(force=True)
+            self.context_pop()
+            self.reboot_sitl()
+
     def tests1a(self):
         '''return list of all tests'''
         ret = super(AutoTestCopter, self).tests()  # about 5 mins and ~20 initial tests from autotest/vehicle_test_suite.py
@@ -13887,6 +13976,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.BodyFrameOdom,
              self.GPSViconSwitching,
              self.DroneShowTakeoffPadSink,
+             self.DroneShowGdmb,
         ])
         return ret
 

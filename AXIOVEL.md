@@ -66,7 +66,8 @@ Discord guidance does not. `AVCopter-4.6` is no longer supported
 
 ## Testing
 
-Of these, CI runs only `VisionPosition` ([docs/axiovel-ci.md](docs/axiovel-ci.md)).
+Of these, CI runs only `VisionPosition` and `DroneShowGdmb`
+([docs/axiovel-ci.md](docs/axiovel-ci.md)).
 Run what covers your change and say in the PR what you ran.
 
 - Unit tests (GTest): `./waf configure --board sitl`, then
@@ -74,7 +75,9 @@ Run what covers your change and say in the PR what you ran.
   (reader against the golden vectors), `test_sdcard_ota`,
   `test_jitter_correction`, `test_baro_bmp581`.
 - Autotests (`Tools/autotest/autotest.py build.Copter test.Copter.<name>`):
-  `DroneShowTakeoffPadSink` (the only SHOW-mode autotest), `ExtNavClockReset`,
+  `DroneShowGdmb` (a certified `.gdmb` flown in SHOW mode; its fixture is
+  one drone of axio-e2e's `specs/shows/quartet.gdm`), `DroneShowTakeoffPadSink`,
+  `ExtNavClockReset`,
   `VisionPosition` (per-axis covariance, extnav Z origin), `VirtualCompass`,
   `VirtualCompassMission` and their `RateThread` variants.
 - Show-mode SITL scripts in `Tools/scripts/`: `show_schedule_sitl.py` (mode 2
