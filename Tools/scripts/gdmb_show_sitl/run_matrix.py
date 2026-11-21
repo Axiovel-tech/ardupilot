@@ -10,7 +10,7 @@ Example (the three arms of ADR 0002 phase 1, plus .skyb with feed-forward):
 
     run_matrix.py --gdm fable-v2.gdm --skyb-dir skyb --out runs \\
         --arm skyb:skyb:1 --arm skyb-ff:skyb:3 --arm gdm-noff:gdm:5 --arm gdm-ff:gdm:1 \\
-        --parallel 14 --speedup 2 --param SHOW_TAKEOFF_ALT=1
+        --speedup 2 --param SHOW_TAKEOFF_ALT=1
 
 Then: analyze.py results.json gdm-ff=runs/gdm-ff-d001,runs/gdm-ff-d002,...
 """
