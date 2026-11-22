@@ -81,7 +81,8 @@ jobs:
             test.Copter.InitialMode \
             test.Copter.LoiterToAlt \
             test.Copter.VisionPosition \
-            test.Copter.MAV_CMD_CONDITION_YAW
+            test.Copter.MAV_CMD_CONDITION_YAW \
+            test.Copter.DroneShowShutdownBlackout
 
       - name: Upload SITL failure artifacts
         uses: actions/upload-artifact@v4
