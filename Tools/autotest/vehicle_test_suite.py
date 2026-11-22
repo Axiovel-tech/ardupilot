@@ -11443,7 +11443,7 @@ Also, ignores heartbeats not from our target system'''
             target_compid = 1
         if isinstance(message_id, str):
             message_id = eval("mavutil.mavlink.MAVLINK_MSG_ID_%s" % message_id)
-        tstart = self.get_sim_time() # required for timeout in run_cmd_get_ack to work
+        self.get_sim_time() # required for timeout in run_cmd_get_ack to work
         self.send_poll_message(message_id, quiet=quiet, mav=mav, target_sysid=target_sysid, target_compid=target_compid, p2=p2)
         self.run_cmd_get_ack(
             mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE,
@@ -11452,6 +11452,9 @@ Also, ignores heartbeats not from our target system'''
             quiet=quiet,
             mav=mav,
         )
+        # time the reply from the ACK: telemetry queued while we were
+        # not reading advances the cached sim time past the request
+        tstart = self.get_sim_time_cached()
         while True:
             if self.get_sim_time_cached() - tstart > timeout:
                 raise NotAchievedException("Did not receive polled message")
