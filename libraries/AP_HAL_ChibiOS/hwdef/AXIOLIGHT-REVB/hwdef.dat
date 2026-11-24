@@ -93,9 +93,14 @@ define DEFAULT_SERIAL5_BAUD 115
 define DEFAULT_SERIAL7_PROTOCOL SerialProtocol_None
 define DEFAULT_SERIAL7_BAUD 115
 
-# MAVLINK wifi ESPS3
+# MAVLINK wifi ESPS3. 2 Mbaud for log downloads over Wi-Fi: needs a tag
+# image whose vehicle UART also runs at 2 Mbaud (rtls-link-zephyr)
 define DEFAULT_SERIAL8_PROTOCOL SerialProtocol_MAVLink2
-define DEFAULT_SERIAL8_BAUD 921
+define DEFAULT_SERIAL8_BAUD 2000
+
+# 512-byte TX DMA transfers: with the default 64 the gaps between transfers
+# leave SERIAL8 at about 56 % of 2 Mbaud during a log download
+define HAL_UART_TX_BOUNCE_BUFSIZE 512
 
 # I2C1
 PB6 I2C1_SCL I2C1
