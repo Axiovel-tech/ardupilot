@@ -744,6 +744,22 @@ const AP_Param::GroupInfo NavEKF3::var_info2[] = {
     // @User: Advanced
     AP_GROUPINFO("OPTIONS",  11, NavEKF3, _options, 0),
 
+    // @Param: ACC_AVG
+    // @DisplayName: Averaged accelerometers
+    // @Description: Bitmask of two IMUs whose accelerometers are averaged with equal weights. A lane whose IMU is one of the two uses the average as its accelerometer and its own IMU as its gyro. An IMU is left out of the average only while it is unhealthy, stops sending samples or clips; the other then stands in, offset by their last measured difference, and the returning IMU fades back in over a few seconds. The averaged accelerometer is located at the midpoint of the two INS_POS offsets. Arming requires both IMUs to be in the average. Use with EK3_IMU_MASK selecting one of the two IMUs. Set to 0 to disable.
+    // @Bitmask: 0:FirstIMU,1:SecondIMU,2:ThirdIMU
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("ACC_AVG", 20, NavEKF3, _accAvgMask, 0),
+
+    // @Param: ABIAS_DIFF
+    // @DisplayName: Averaged accelerometers Z bias uncertainty per IMU difference change
+    // @Description: With EK3_ACC_AVG, a change in the vertical accel difference of the two averaged IMUs shows that their offsets are moving, for example as a heat-soaked board cools in propwash, and the average's own offset moves by a fraction of that change: at most half if only one IMU moves. The Z accel bias uncertainty is kept at least this fraction of the recent change of the difference, so the bias estimate follows the average's offset while the IMUs' offsets move and is left alone once they settle. Set to 0 to disable.
+    // @Range: 0 0.5
+    // @Increment: 0.05
+    // @User: Advanced
+    AP_GROUPINFO("ABIAS_DIFF", 21, NavEKF3, _accBiasDiffScale, 0.0f),
+
     AP_GROUPEND
 };
 
@@ -1293,6 +1309,15 @@ void NavEKF3::getAccelBias(int8_t instance, Vector3f &accelBias) const
     if (core) {
         core[instance].getAccelBias(accelBias);
     }
+}
+
+bool NavEKF3::getAccelAverage(int8_t instance, AccelAverage &average) const
+{
+    if (instance < 0 || instance >= num_cores) instance = primary;
+    if (core) {
+        return core[instance].getAccelAverage(average);
+    }
+    return false;
 }
 
 // returns active source set used by EKF3

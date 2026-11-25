@@ -24,6 +24,7 @@
     #pragma GCC optimize("O2")
 #endif
 
+#include "AP_NavEKF3.h"
 #include "AP_NavEKF3_feature.h"
 #include <AP_Common/Location.h>
 #include <AP_Math/AP_Math.h>
@@ -182,6 +183,9 @@ public:
 
     // return accelerometer bias in m/s/s
     void getAccelBias(Vector3f &accelBias) const;
+
+    // return false if this lane doesn't average IMU accels
+    bool getAccelAverage(NavEKF3::AccelAverage &average) const;
 
     // reset body axis gyro bias estimates
     void resetGyroBias(void);
@@ -688,6 +692,23 @@ private:
         Vector3F accel_bias;
     } inactiveBias[INS_MAX_INSTANCES];
 
+    // equal-weight average of the accels of two IMUs (EK3_ACC_AVG)
+    struct {
+        bool enabled;
+        uint8_t imu[2];
+        int8_t solo;            // member standing in alone while the other is faulted or fading back in, -1 if none
+        ftype fade;             // weight of the full average while a member fades back in
+        Vector3F diff;          // filtered accel of imu[1] minus accel of imu[0] (m/s/s)
+        Vector3F heldDiff;      // diff when a member was last left out (m/s/s)
+        ftype diffSlowZ;        // diff.z filtered over a few seconds (m/s/s)
+        ftype weight[2];
+        Vector3F offset;        // added to the weighted accels (m/s/s)
+        uint8_t faulted;        // bitmask of members with a hard fault
+        bool disagree;
+        uint32_t lastDropReport_ms;
+        uint32_t lastDisagreeReport_ms;
+    } accelAvg;
+
     // Specify source of data to be used for a partial state reset
     // Checking the availability and quality of the data source specified is the responsibility of the caller
     enum class resetDataSource {
@@ -728,6 +749,12 @@ private:
 
     // constrain variances (diagonal terms) in the state covariance matrix
     void ConstrainVariances();
+
+    // keep the Z accel bias variance up while the averaged IMUs' offsets move (EK3_ABIAS_DIFF)
+    void updateAveragedAccelBiasVariance();
+
+    // minimum Z accel bias uncertainty that updateAveragedAccelBiasVariance() keeps (m/s/s)
+    ftype averagedAccelBiasFloor() const;
 
     // constrain states
     void ConstrainStates();
@@ -795,6 +822,12 @@ private:
 
     // update estimate of inactive bias states
     void learnInactiveBiases();
+
+    // read the averaged delta velocity of the IMUs in EK3_ACC_AVG
+    void readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt);
+
+    // filtered accel of this lane's accel source, before bias correction
+    Vector3F filteredAccel() const;
 
     // check for new valid GPS data and update stored measurement if available
     void readGpsData();
@@ -1664,6 +1697,7 @@ private:
     void Log_Write_XKF4(uint64_t time_us) const;
     void Log_Write_XKF5(uint64_t time_us) const;
     void Log_Write_XKFS(uint64_t time_us) const;
+    void Log_Write_XKAV(uint64_t time_us) const;
     void Log_Write_Quaternion(uint64_t time_us) const;
     void Log_Write_Beacon(uint64_t time_us);
     void Log_Write_BodyOdom(uint64_t time_us);

@@ -404,7 +404,8 @@ void NavEKF3_core::readIMUData(bool startPredictEnabled)
 
     uint8_t accel_active, gyro_active;
 
-    if (ins.use_accel(imu_index)) {
+    if (ins.use_accel(imu_index) || accelAvg.enabled) {
+        // an averaging lane's accel bias belongs to the average, whichever IMUs are in it
         accel_active = imu_index;
     } else {
         accel_active = ins.get_first_usable_accel();
@@ -437,8 +438,14 @@ void NavEKF3_core::readIMUData(bool startPredictEnabled)
     // run movement check using IMU data
     updateMovementCheck();
 
-    readDeltaVelocity(accel_index_active, imuDataNew.delVel, imuDataNew.delVelDT);
-    accelPosOffset = ins.get_imu_pos_offset(accel_index_active).toftype();
+    if (accelAvg.enabled) {
+        readAveragedDeltaVelocity(imuDataNew.delVel, imuDataNew.delVelDT);
+        accelPosOffset = (ins.get_imu_pos_offset(accelAvg.imu[0]) * accelAvg.weight[0] +
+                          ins.get_imu_pos_offset(accelAvg.imu[1]) * accelAvg.weight[1]).toftype();
+    } else {
+        readDeltaVelocity(accel_index_active, imuDataNew.delVel, imuDataNew.delVelDT);
+        accelPosOffset = ins.get_imu_pos_offset(accel_index_active).toftype();
+    }
     imuDataNew.accel_index = accel_index_active;
     
     // Get delta angle data from primary gyro or primary if not available
@@ -550,6 +557,120 @@ bool NavEKF3_core::readDeltaVelocity(uint8_t ins_index, Vector3F &dVel, ftype &d
         return true;
     }
     return false;
+}
+
+/*
+  read the equal-weight average of the delta velocities of the two IMUs in
+  EK3_ACC_AVG. While one of them has a hard fault the other stands in,
+  offset by half of their filtered difference as it was when the fault
+  began, so that the average doesn't step, and the faulted IMU fades back
+  in once it recovers. Disagreement alone never drops an IMU: with two IMUs
+  there is no telling which is wrong.
+ */
+void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
+{
+    const auto &ins = dal.ins();
+    const ftype diffTau = 0.25;         // s
+    // longer than the Z accel bias takes to converge once its variance is raised
+    const ftype diffSlowTau = 5.0;      // s
+    const ftype fadeTime = 3.0;         // s
+    const ftype disagreeLimit = 1.0;    // m/s/s
+
+    Vector3F accel[2];
+    ftype accelDT[2];
+    bool usable[2];
+    bool clipping[2];
+    for (uint8_t i=0; i<2; i++) {
+        const uint8_t imu = accelAvg.imu[i];
+        Vector3F dv;
+        usable[i] = readDeltaVelocity(imu, dv, accelDT[i]) && ins.use_accel(imu);
+        if (imu >= ins.get_accel_count()) {
+            dv.zero();
+            accelDT[i] = dtIMUavg;
+        }
+        accel[i] = dv / accelDT[i];
+        clipping[i] = ins.accel_clipping(imu);
+    }
+
+    // a clipping IMU is left out only while the other one isn't clipping
+    uint8_t faulted = 0;
+    for (uint8_t i=0; i<2; i++) {
+        const uint8_t other = 1 - i;
+        if (!usable[i] || (clipping[i] && usable[other] && !clipping[other])) {
+            faulted |= 1U << i;
+        }
+    }
+
+    const uint32_t now_ms = imuSampleTime_ms;
+    if (faulted == 0) {
+        if (!clipping[0] && !clipping[1]) {
+            accelAvg.diff += (accel[1] - accel[0] - accelAvg.diff) * (dtIMUavg / (dtIMUavg + diffTau));
+            accelAvg.diffSlowZ += (accelAvg.diff.z - accelAvg.diffSlowZ) * (dtIMUavg / (dtIMUavg + diffSlowTau));
+        }
+        if (accelAvg.solo >= 0) {
+            accelAvg.fade += dtIMUavg / fadeTime;
+            if (accelAvg.fade >= 1) {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "EKF3 IMU%u averaging IMU%u accel again",
+                              (unsigned)imu_index, (unsigned)accelAvg.imu[1-accelAvg.solo]);
+                accelAvg.solo = -1;
+                accelAvg.fade = 1;
+            }
+        }
+        const ftype diffLength = accelAvg.diff.length();
+        if (!accelAvg.disagree && diffLength > disagreeLimit) {
+            accelAvg.disagree = true;
+            if (now_ms - accelAvg.lastDisagreeReport_ms > 10000) {
+                accelAvg.lastDisagreeReport_ms = now_ms;
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 IMU%u: IMU%u/IMU%u accels differ by %.1f m/s/s",
+                              (unsigned)imu_index, (unsigned)accelAvg.imu[0], (unsigned)accelAvg.imu[1], (double)diffLength);
+            }
+        } else if (accelAvg.disagree && diffLength < 0.8 * disagreeLimit) {
+            accelAvg.disagree = false;
+        }
+    } else if (faulted != 3) {
+        const int8_t solo = (faulted & 1) ? 1 : 0;
+        const uint8_t dropped = 1 - solo;
+        if (accelAvg.solo < 0 || accelAvg.fade > 0) {
+            accelAvg.heldDiff = accelAvg.diff;
+            if (now_ms - accelAvg.lastDropReport_ms > 5000) {
+                accelAvg.lastDropReport_ms = now_ms;
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 IMU%u stopped averaging IMU%u accel (%s)",
+                              (unsigned)imu_index, (unsigned)accelAvg.imu[dropped], usable[dropped] ? "clipping" : "unhealthy");
+            }
+        }
+        accelAvg.solo = solo;
+        accelAvg.fade = 0;
+    }
+    accelAvg.faulted = faulted;
+
+    if (accelAvg.solo < 0) {
+        accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
+        accelAvg.offset.zero();
+    } else {
+        const uint8_t solo = accelAvg.solo;
+        accelAvg.weight[solo] = 1 - 0.5 * accelAvg.fade;
+        accelAvg.weight[1-solo] = 0.5 * accelAvg.fade;
+        // half of the difference takes the solo IMU to the average
+        accelAvg.offset = accelAvg.heldDiff * ((solo == 0 ? 0.5 : -0.5) * (1 - accelAvg.fade));
+    }
+
+    Vector3F accelOut = accelAvg.offset;
+    dVel_dt = 0;
+    for (uint8_t i=0; i<2; i++) {
+        accelOut += accel[i] * accelAvg.weight[i];
+        dVel_dt += accelDT[i] * accelAvg.weight[i];
+    }
+    dVel = accelOut * dVel_dt;
+}
+
+Vector3F NavEKF3_core::filteredAccel() const
+{
+    const auto &ins = dal.ins();
+    if (!accelAvg.enabled) {
+        return ins.get_accel(accel_index_active).toftype();
+    }
+    return ins.get_accel(accelAvg.imu[0]).toftype() * accelAvg.weight[0] +
+           ins.get_accel(accelAvg.imu[1]).toftype() * accelAvg.weight[1] + accelAvg.offset;
 }
 
 /********************************************************
@@ -1347,6 +1468,11 @@ void NavEKF3_core::learnInactiveBiases(void)
         }
     }
 
+    if (accelAvg.enabled) {
+        inactiveBias[accel_index_active].accel_bias = stateStruct.accel_bias;
+        return;
+    }
+
     // learn accel biases
     for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
         if (!ins.use_accel(i)) {
@@ -1421,7 +1547,7 @@ void NavEKF3_core::updateMovementCheck(void)
     // get latest bias corrected gyro and accelerometer data
     const auto &ins = dal.ins();
     Vector3F gyro = ins.get_gyro(gyro_index_active).toftype() - stateStruct.gyro_bias * dtEkfAvgInv;
-    Vector3F accel = ins.get_accel(accel_index_active).toftype() - stateStruct.accel_bias * dtEkfAvgInv;
+    Vector3F accel = filteredAccel() - stateStruct.accel_bias * dtEkfAvgInv;
 
     if (!prevOnGround) {
         gyro_prev = gyro;
