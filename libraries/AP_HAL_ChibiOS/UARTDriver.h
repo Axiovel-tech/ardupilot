@@ -23,7 +23,13 @@
 #include "Semaphores.h"
 
 #define RX_BOUNCE_BUFSIZE 64U
-#define TX_BOUNCE_BUFSIZE 64U
+// size of one TX DMA transfer. Each transfer is followed by a gap of about
+// 0.25 ms before the next one starts, so a board running a UART at
+// megabaud rates needs a larger buffer to use the line fully
+#ifndef HAL_UART_TX_BOUNCE_BUFSIZE
+#define HAL_UART_TX_BOUNCE_BUFSIZE 64U
+#endif
+#define TX_BOUNCE_BUFSIZE HAL_UART_TX_BOUNCE_BUFSIZE
 
 // enough for serial0 to serial9, plus IOMCU
 #define UART_MAX_DRIVERS 11

@@ -287,7 +287,7 @@ SERIAL5_BAUD,115
 SERIAL7_PROTOCOL,-1
 SERIAL7_BAUD,115
 SERIAL8_PROTOCOL,2
-SERIAL8_BAUD,921
+SERIAL8_BAUD,2000
 
 # The tag's position link (SERIAL4) is private: without this, ArduPilot routes
 # the tag's 50 Hz VISION_POSITION_ESTIMATE and show clock out of every other
