@@ -591,7 +591,7 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
             dv.zero();
             accelDT[i] = dtIMUavg;
         }
-        accel[i] = dv / accelDT[i];
+        accel[i] = is_positive(accelDT[i]) ? dv / accelDT[i] : Vector3F();
         clipping[i] = ins.accel_clipping(imu);
     }
 
@@ -631,8 +631,10 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
     } else if (faulted != 3) {
         const int8_t solo = (faulted & 1) ? 1 : 0;
         const uint8_t dropped = 1 - solo;
-        if (accelAvg.solo < 0 || accelAvg.fade > 0) {
-            accelAvg.heldDiff = accelAvg.diff;
+        if (accelAvg.solo != solo || accelAvg.fade > 0) {
+            // hold the offset already applied, as seen from the new solo IMU, so the output doesn't step
+            const Vector3F reached = accelAvg.heldDiff * (1 - accelAvg.fade) + accelAvg.diff * accelAvg.fade;
+            accelAvg.heldDiff = (accelAvg.solo == solo) ? reached : accelAvg.diff * 2 - reached;
             if (now_ms - accelAvg.lastDropReport_ms > 5000) {
                 accelAvg.lastDropReport_ms = now_ms;
                 GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 IMU%u stopped averaging IMU%u accel (%s)",

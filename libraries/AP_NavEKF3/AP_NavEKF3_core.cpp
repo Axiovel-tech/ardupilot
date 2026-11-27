@@ -31,6 +31,16 @@ bool NavEKF3_core::setup_core(uint8_t _imu_index, uint8_t _core_index)
         accelAvg.imu[0] = __builtin_ctz(avgMask);
         accelAvg.imu[1] = __builtin_ctz(avgMask & ~(1U<<accelAvg.imu[0]));
     }
+    // the IMUs' state outlives filter resets, so bootstrap sees which IMUs are faulted
+    accelAvg.solo = -1;
+    accelAvg.fade = 1;
+    accelAvg.diff.zero();
+    accelAvg.heldDiff.zero();
+    accelAvg.diffSlow.zero();
+    accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
+    accelAvg.offset.zero();
+    accelAvg.faulted = 0;
+    accelAvg.disagree = false;
 
     /*
       The imu_buffer_length needs to cope with the worst case sensor delay at the
@@ -342,15 +352,6 @@ void NavEKF3_core::InitialiseVariables()
     imuDataDownSampledNew.delVelDT = 0.0f;
     imuDataDownSampledNew.gyro_index = gyro_index_active;
     imuDataDownSampledNew.accel_index = accel_index_active;
-    accelAvg.solo = -1;
-    accelAvg.fade = 1;
-    accelAvg.diff.zero();
-    accelAvg.heldDiff.zero();
-    accelAvg.diffSlow.zero();
-    accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
-    accelAvg.offset.zero();
-    accelAvg.faulted = 0;
-    accelAvg.disagree = false;
     runUpdates = false;
     framesSincePredict = 0;
     gpsYawResetRequest = false;
