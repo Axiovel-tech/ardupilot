@@ -245,6 +245,25 @@ void Replay::write_EKF_formats(void)
     }
 }
 
+static const LogStructure EKF3_log_structures[] = {
+    { LOG_FORMAT_UNITS_MSG, sizeof(log_Format_Units), \
+      "FMTU", "QBNN",      "TimeUS,FmtType,UnitIds,MultIds","s---", "F---" },   \
+    LOG_STRUCTURE_FROM_NAVEKF3
+};
+
+/*
+  write the format of XKAV, which a log recorded before EK3_ACC_AVG
+  existed does not carry
+ */
+void Replay::write_XKAV_format(void)
+{
+    for (const auto &f : EKF3_log_structures) {
+        if (f.msg_type == LOG_FORMAT_UNITS_MSG || f.msg_type == LOG_XKAV_MSG) {
+            Write_Format(f);
+        }
+    }
+}
+
 void Replay::setup()
 {
     ::printf("Starting\n");
@@ -292,6 +311,7 @@ void Replay::setup()
     if (replay_force_ekf2) {
         write_EKF_formats();
     }
+    write_XKAV_format();
 }
 
 void Replay::loop()

@@ -34,6 +34,9 @@ void AP_DAL_InertialSensor::start_frame()
         if (RISI.use_accel) {
             RISI.get_delta_velocity_ret = ins.get_delta_velocity(i, RISI.delta_velocity, RISI.delta_velocity_dt);
         }
+        const uint32_t clip_count = ins.get_accel_clip_count(i);
+        RISI.accel_clipping = clip_count != accel_clip_count[i];
+        accel_clip_count[i] = clip_count;
 
         // gryo data
         RISI.use_gyro = ins.use_gyro(i);
