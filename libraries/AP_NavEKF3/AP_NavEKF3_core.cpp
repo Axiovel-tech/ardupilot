@@ -346,7 +346,7 @@ void NavEKF3_core::InitialiseVariables()
     accelAvg.fade = 1;
     accelAvg.diff.zero();
     accelAvg.heldDiff.zero();
-    accelAvg.diffSlowZ = 0;
+    accelAvg.diffSlow.zero();
     accelAvg.weight[0] = accelAvg.weight[1] = 0.5;
     accelAvg.offset.zero();
     accelAvg.faulted = 0;
@@ -1834,7 +1834,7 @@ ftype NavEKF3_core::averagedAccelBiasFloor() const
     if (!accelAvg.enabled || accelAvg.faulted != 0) {
         return 0;
     }
-    return frontend->_accBiasDiffScale.get() * fabsF(accelAvg.diff.z - accelAvg.diffSlowZ);
+    return frontend->_accBiasDiffScale.get() * fabsF(accelAvg.diff.z - accelAvg.diffSlow.z);
 }
 
 void NavEKF3_core::updateAveragedAccelBiasVariance()

@@ -17220,7 +17220,7 @@ return update, 1000
             10: lambda: self.send_set_parameter_direct("SIM_ACC2_BIAS_Z", 1.4),
         }
         self.fly_pad_takeoff_hover(events, hover_time=30, actions=actions)
-        self.wait_statustext("IMU0/IMU1 accels differ", check_context=True)
+        self.wait_statustext("IMU0/IMU1 accel difference jumped", check_context=True)
         logpath = self.current_onboard_log_filepath()
         self.context_pop()
         dfreader = self.dfreader_for_path(logpath)

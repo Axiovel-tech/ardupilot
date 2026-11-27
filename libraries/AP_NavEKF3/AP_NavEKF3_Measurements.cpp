@@ -565,7 +565,9 @@ bool NavEKF3_core::readDeltaVelocity(uint8_t ins_index, Vector3F &dVel, ftype &d
   offset by half of their filtered difference as it was when the fault
   began, so that the average doesn't step, and the faulted IMU fades back
   in once it recovers. Disagreement alone never drops an IMU: with two IMUs
-  there is no telling which is wrong.
+  there is no telling which is wrong. A sudden change of their difference
+  is reported; the slow offset that builds as the board cools at take-off
+  is not.
  */
 void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
 {
@@ -574,6 +576,7 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
     // longer than the Z accel bias takes to converge once its variance is raised
     const ftype diffSlowTau = 5.0;      // s
     const ftype fadeTime = 3.0;         // s
+    // change of the difference against its slow filter; take-offs reach 0.64
     const ftype disagreeLimit = 1.0;    // m/s/s
 
     Vector3F accel[2];
@@ -605,7 +608,7 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
     if (faulted == 0) {
         if (!clipping[0] && !clipping[1]) {
             accelAvg.diff += (accel[1] - accel[0] - accelAvg.diff) * (dtIMUavg / (dtIMUavg + diffTau));
-            accelAvg.diffSlowZ += (accelAvg.diff.z - accelAvg.diffSlowZ) * (dtIMUavg / (dtIMUavg + diffSlowTau));
+            accelAvg.diffSlow += (accelAvg.diff - accelAvg.diffSlow) * (dtIMUavg / (dtIMUavg + diffSlowTau));
         }
         if (accelAvg.solo >= 0) {
             accelAvg.fade += dtIMUavg / fadeTime;
@@ -616,15 +619,13 @@ void NavEKF3_core::readAveragedDeltaVelocity(Vector3F &dVel, ftype &dVel_dt)
                 accelAvg.fade = 1;
             }
         }
-        const ftype diffLength = accelAvg.diff.length();
-        if (!accelAvg.disagree && diffLength > disagreeLimit) {
+        const ftype diffChange = (accelAvg.diff - accelAvg.diffSlow).length();
+        if (!accelAvg.disagree && diffChange > disagreeLimit && now_ms - accelAvg.lastDisagreeReport_ms > 10000) {
             accelAvg.disagree = true;
-            if (now_ms - accelAvg.lastDisagreeReport_ms > 10000) {
-                accelAvg.lastDisagreeReport_ms = now_ms;
-                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 IMU%u: IMU%u/IMU%u accels differ by %.1f m/s/s",
-                              (unsigned)imu_index, (unsigned)accelAvg.imu[0], (unsigned)accelAvg.imu[1], (double)diffLength);
-            }
-        } else if (accelAvg.disagree && diffLength < 0.8 * disagreeLimit) {
+            accelAvg.lastDisagreeReport_ms = now_ms;
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 IMU%u: IMU%u/IMU%u accel difference jumped %.1f m/s/s",
+                          (unsigned)imu_index, (unsigned)accelAvg.imu[0], (unsigned)accelAvg.imu[1], (double)diffChange);
+        } else if (accelAvg.disagree && diffChange < 0.8 * disagreeLimit) {
             accelAvg.disagree = false;
         }
     } else if (faulted != 3) {

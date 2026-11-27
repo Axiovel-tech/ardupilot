@@ -700,7 +700,7 @@ private:
         ftype fade;             // weight of the full average while a member fades back in
         Vector3F diff;          // filtered accel of imu[1] minus accel of imu[0] (m/s/s)
         Vector3F heldDiff;      // diff when a member was last left out (m/s/s)
-        ftype diffSlowZ;        // diff.z filtered over a few seconds (m/s/s)
+        Vector3F diffSlow;      // diff filtered over a few seconds (m/s/s)
         ftype weight[2];
         Vector3F offset;        // added to the weighted accels (m/s/s)
         uint8_t faulted;        // bitmask of members with a hard fault
