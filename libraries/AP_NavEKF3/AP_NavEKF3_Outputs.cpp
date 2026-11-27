@@ -40,13 +40,10 @@ bool NavEKF3_core::healthy(void) const
 bool NavEKF3_core::pre_arm_check(bool requires_position, char *failure_msg, uint8_t failure_msg_len) const
 {
     if (accelAvg.enabled) {
-        uint8_t notAveraged = accelAvg.faulted;
-        if (accelAvg.solo >= 0) {
-            notAveraged |= 1U << (1 - accelAvg.solo);
-        }
-        if (notAveraged != 0) {
+        // an IMU fading back in after a fault, such as a touchdown clip, is healthy again
+        if (accelAvg.faulted != 0) {
             dal.snprintf(failure_msg, failure_msg_len,
-                         "EKF3[%u] IMU%u accel not averaged", unsigned(core_index)+1, unsigned(accelAvg.imu[__builtin_ctz(notAveraged)]));
+                         "EKF3[%u] IMU%u accel not averaged", unsigned(core_index)+1, unsigned(accelAvg.imu[__builtin_ctz(accelAvg.faulted)]));
             return false;
         }
     }

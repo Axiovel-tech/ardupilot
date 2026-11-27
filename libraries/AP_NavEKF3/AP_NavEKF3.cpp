@@ -746,7 +746,7 @@ const AP_Param::GroupInfo NavEKF3::var_info2[] = {
 
     // @Param: ACC_AVG
     // @DisplayName: Averaged accelerometers
-    // @Description: Bitmask of two IMUs whose accelerometers are averaged with equal weights. A lane whose IMU is one of the two uses the average as its accelerometer and its own IMU as its gyro. An IMU is left out of the average only while it is unhealthy, stops sending samples or clips; the other then stands in, offset by their last measured difference, and the returning IMU fades back in over a few seconds. The averaged accelerometer is located at the midpoint of the two INS_POS offsets. Arming requires both IMUs to be in the average. Use with EK3_IMU_MASK selecting one of the two IMUs. Set to 0 to disable.
+    // @Description: Bitmask of two IMUs whose accelerometers are averaged with equal weights. A lane whose IMU is one of the two uses the average as its accelerometer and its own IMU as its gyro. An IMU is left out of the average only while it is unhealthy, stops sending samples or clips; the other then stands in, offset by their last measured difference, and the returning IMU fades back in over a few seconds. The averaged accelerometer is located at the midpoint of the two INS_POS offsets. Arming is refused while either IMU is left out. Use with EK3_IMU_MASK selecting one of the two IMUs. Set to 0 to disable.
     // @Bitmask: 0:FirstIMU,1:SecondIMU,2:ThirdIMU
     // @User: Advanced
     // @RebootRequired: True
